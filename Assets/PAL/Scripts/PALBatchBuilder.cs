@@ -79,7 +79,7 @@ public class PALBatchBuilder
 	#endregion
 
 	#region BatchBuilder
-	const int ShaderConstantBufferSize = 1023;
+	public const int ShaderConstantBufferSize = 1023;
 
 	static public int NumPolygons { get; private set; }
 	static public int NumVertices { get; private set; }

@@ -151,11 +151,14 @@ public class MeshAreaLight : MonoBehaviour
 		for( int j=2; j<_polygonalAreaLight.Vertices.Length; j++ )
 		{
 			Vector3 e = ( _polygonalAreaLight.Vertices[j] - _polygonalAreaLight.Vertices[0] ).normalized;
-			float dotProduct = Mathf.Abs( Vector3.Dot( e0, e1 ) );
-			if( dotProduct < bestDotProduct )
+			if( e.magnitude > Mathf.Epsilon )
 			{
-				e1 = e;
-				bestDotProduct = dotProduct;
+				float dotProduct = Mathf.Abs( Vector3.Dot( e0, e ) );
+				if( dotProduct < bestDotProduct )
+				{
+					e1 = e;
+					bestDotProduct = dotProduct;
+				}
 			}
 		}
 		_polygonalAreaLight.Normal = Vector3.Cross( e0, e1 ).normalized;

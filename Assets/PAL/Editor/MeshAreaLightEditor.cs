@@ -44,7 +44,7 @@ public class MeshAreaLightEditor : Editor
 		GUILayout.Label( "Batch stats:" );
 		GUILayout.Label( "Num polygons: " + PALBatchBuilder.NumPolygons );
 		GUILayout.Label( "Num vertices: " + PALBatchBuilder.NumVertices );
-		GUILayout.Label( "Buffer size: " + PALBatchBuilder.BufferSize );
+		GUILayout.Label( "Buffer size: " + PALBatchBuilder.BufferSize + "/" + PALBatchBuilder.ShaderConstantBufferSize );
 
 		DrawDefaultInspector();
 

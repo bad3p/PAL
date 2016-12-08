@@ -27,7 +27,7 @@
 #include "UnityCG.cginc"
 
 uniform float4 _PALBufferSizes;
-uniform float4 _PALBuffer[2048];
+uniform float4 _PALBuffer[1023];
 
 #define PAL_NUM_POLYGONS (int)_PALBufferSizes.x
 
