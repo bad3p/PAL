@@ -64,7 +64,7 @@ public class MeshAreaLight : MonoBehaviour
 	Vector3[]    _sharedMeshVertices;
 	int[]        _sharedMeshTriangles;
 	Bounds       _sharedMeshBounds;
-	int          _batchIndex = -1;
+	PolygonalAreaLight _polygonalAreaLight = new PolygonalAreaLight();
 	#endregion
 
 	#region MonoBehaviour
@@ -77,53 +77,25 @@ public class MeshAreaLight : MonoBehaviour
 		_sharedMeshVertices = _sharedMesh.vertices;
 		_sharedMeshTriangles = _sharedMesh.triangles;
 		_sharedMeshBounds = _sharedMesh.bounds;
-
-		_meshAreaLights.Add( this );
-
-		if( _propertyId.Length != ShaderConstantBufferSize )
-		{
-			_propertyId = new string[ShaderConstantBufferSize];
-			for( int i=0; i<ShaderConstantBufferSize; i++ )
-			{
-				_propertyId[i] = "_PALBuffer" + i.ToString();
-			}
-		}
-
-		if( _propertyValue.Length != ShaderConstantBufferSize )
-		{
-			_propertyValue = new Vector4[ShaderConstantBufferSize];
-		}
-
-		_lastFrameCount = -1;
-		_numAreaLightsUpdated = 0;
+		PALBatchBuilder.RegisterPolygonalAreaLight( _polygonalAreaLight );
 	}
 
 	void OnDestroy() 
-	{
-		if( _meshAreaLights.Contains( this ) )
-		{
-			_meshAreaLights.Remove( this );
-		}
+	{		
+		PALBatchBuilder.UnregisterPolygonalAreaLight( _polygonalAreaLight );
 	}
 
 	void OnEnable() 
 	{
-		if( !_meshAreaLights.Contains( this ) )
-		{
-			_meshAreaLights.Add( this );
-		}
 	}
 
 	void OnDisable() 
 	{
-		if( _meshAreaLights.Contains( this ) )
-		{
-			_meshAreaLights.Remove( this );
-		}
 	}
 
 	void Update() 
 	{
+		/*
 		if( _lastFrameCount != Time.frameCount )
 		{
 			_lastFrameCount = Time.frameCount;
@@ -138,6 +110,10 @@ public class MeshAreaLight : MonoBehaviour
 		{
 			UpdateBatch();
 		}
+		*/
+
+		UpdatePolygonalAreaLight();
+		PALBatchBuilder.Update( _polygonalAreaLight );
 	}
 
 	void OnDrawGizmos() 
@@ -149,129 +125,124 @@ public class MeshAreaLight : MonoBehaviour
 		}
 		*/
 	}
+
+	void UpdatePolygonalAreaLight()
+	{
+		_polygonalAreaLight.Color = this.Color;
+		_polygonalAreaLight.Intensity = this.Intensity;
+		_polygonalAreaLight.Bias = this.Bias;
+		_polygonalAreaLight.ProjectionMode = this.ProjectionMode;
+
+		if( _polygonalAreaLight.Vertices.Length < this.Vertices.Length )
+		{
+			_polygonalAreaLight.Vertices = new Vector3[this.Vertices.Length];
+		}
+
+		Matrix4x4 meshAreaLightTransform = _thisTransform.localToWorldMatrix;
+		for( int j=0; j<this.Vertices.Length; j++ )
+		{
+			int vertexIndex = ( VertexOrder == VertexOrder.CW ) ? ( j ) : ( Vertices.Length - j - 1 );
+			_polygonalAreaLight.Vertices[j] = meshAreaLightTransform.MultiplyPoint( _sharedMeshVertices[Vertices[vertexIndex]] );
+		}
+
+		Vector3 e0 = ( _polygonalAreaLight.Vertices[1] - _polygonalAreaLight.Vertices[0] ).normalized;
+		Vector3 e1 = Vector3.zero;
+		float bestDotProduct = 1.0f;
+		for( int j=2; j<_polygonalAreaLight.Vertices.Length; j++ )
+		{
+			Vector3 e = ( _polygonalAreaLight.Vertices[j] - _polygonalAreaLight.Vertices[0] ).normalized;
+			float dotProduct = Mathf.Abs( Vector3.Dot( e0, e1 ) );
+			if( dotProduct < bestDotProduct )
+			{
+				e1 = e;
+				bestDotProduct = dotProduct;
+			}
+		}
+		_polygonalAreaLight.Normal = Vector3.Cross( e0, e1 ).normalized;
+
+		_polygonalAreaLight.Centroid = Vector4.zero;
+		for( int j=0; j<_polygonalAreaLight.Vertices.Length; j++ )
+		{
+			_polygonalAreaLight.Centroid += _polygonalAreaLight.Vertices[j];
+		}
+		_polygonalAreaLight.Centroid *= 1.0f / _polygonalAreaLight.Vertices.Length;
+
+		// circumcircle
+		Vector3 meshBoundsExtents = _sharedMeshBounds.extents - _polygonalAreaLight.Normal * Vector3.Dot( _sharedMeshBounds.extents, _polygonalAreaLight.Normal );
+		Vector3 meshCircumcenter = meshAreaLightTransform.MultiplyPoint( _sharedMeshBounds.center );
+		float meshCircumradius = 0;
+		for( int j=0; j<_polygonalAreaLight.Vertices.Length; j++ )
+		{
+			float distance = Vector3.Distance( meshCircumcenter, _polygonalAreaLight.Vertices[j] );
+			meshCircumradius = Mathf.Max( meshCircumradius, distance );
+		}
+		_polygonalAreaLight.Circumcircle.Set( meshCircumcenter.x, meshCircumcenter.y, meshCircumcenter.z, meshCircumradius );
+	}
 	#endregion	
 
-	#region ShaderBridge
-	const int ShaderConstantBufferSize = 2048;
-
-	static public int NumPolygons { get; private set; }
-	static public int NumVertices { get; private set; }
-	static public int BufferSize { get; private set; }
-
-	static List<MeshAreaLight> _meshAreaLights = new List<MeshAreaLight>();
-	static int                 _lastFrameCount = -1;
-	static int                 _numAreaLightsUpdated = 0;
-	static string[]            _propertyId = new string[0];
-	static Vector4[]           _propertyValue = new Vector4[0];
-	static Vector4             _bufferSizes = Vector4.zero;
-
-	static void UpdateBatch()
+	#region MeshAreaLight
+	public Bounds PolygonBounds
 	{
-		NumPolygons = 0;
-		NumVertices = 0;
-		BufferSize = 0;
-
-		for( int i=0; i<_meshAreaLights.Count; i++ )
+		get
 		{
-			MeshAreaLight meshAreaLight = _meshAreaLights[i];
-			if( meshAreaLight.Vertices.Length < 3 ) continue;
-
-			int requiredBufferSize = 5 + meshAreaLight.Vertices.Length;
-			if( BufferSize + requiredBufferSize < ShaderConstantBufferSize )
-			{
-				NumPolygons++;
-				NumVertices += meshAreaLight.Vertices.Length;
-				BufferSize += requiredBufferSize;
-			}
-		}
-
-		int vertexBufferOffset = NumPolygons * 5;
-
-		int batchIndex = 0;
-		for( int k=0; k<_meshAreaLights.Count; k++ )
-		{
-			MeshAreaLight meshAreaLight = _meshAreaLights[k];
-			if( meshAreaLight.Vertices.Length < 3 ) continue;
-			meshAreaLight._batchIndex = batchIndex;
-
-			if( batchIndex == NumPolygons-1 )
-			{
-				_propertyValue[_propertyValue.Length-1] = _propertyValue[0];
-			}
-				
-			Matrix4x4 meshAreaLightTransform = meshAreaLight._thisTransform.localToWorldMatrix;
-			for( int j=0; j<meshAreaLight.Vertices.Length; j++ )
-			{
-				int vertexIndex = ( meshAreaLight.VertexOrder == VertexOrder.CW ) ? ( j ) : ( meshAreaLight.Vertices.Length - j - 1 );
-				_propertyValue[vertexBufferOffset+j] = meshAreaLightTransform.MultiplyPoint( meshAreaLight._sharedMeshVertices[meshAreaLight.Vertices[vertexIndex]] );
-			}
-
-			// descriptor
-			_propertyValue[batchIndex*5].Set(
-				vertexBufferOffset, 
-				vertexBufferOffset + meshAreaLight.Vertices.Length,
-				meshAreaLight.Intensity,
-				meshAreaLight.Bias
-			);
-
-			// color
-			_propertyValue[batchIndex*5+1] = meshAreaLight.Color;
-
-			// normal
-			Vector3 v0 = meshAreaLight._sharedMeshVertices[meshAreaLight._sharedMeshTriangles[0]];
-			Vector3 v1 = meshAreaLight._sharedMeshVertices[meshAreaLight._sharedMeshTriangles[1]];
-			Vector3 v2 = meshAreaLight._sharedMeshVertices[meshAreaLight._sharedMeshTriangles[2]];
-			Vector3 meshNormal = Vector3.Cross( v1-v0, v2-v0 );
-			meshNormal = meshAreaLightTransform.MultiplyVector( meshNormal ).normalized;
-			_propertyValue[batchIndex*5+2] = meshNormal;
-
-			// centroid
-			Vector4 centroid = Vector4.zero;
-			for( int j=0; j<meshAreaLight.Vertices.Length; j++ )
-			{
-				centroid += _propertyValue[vertexBufferOffset+j];
-			}
-			centroid *= 1.0f / meshAreaLight.Vertices.Length;
-			_propertyValue[batchIndex*5+3] = centroid;
-
-			// circumcircle
-			Vector3 meshBoundsExtents = meshAreaLight._sharedMeshBounds.extents - meshNormal * Vector3.Dot( meshAreaLight._sharedMeshBounds.extents, meshNormal );
-			Vector3 meshCircumcenter = meshAreaLightTransform.MultiplyPoint( meshAreaLight._sharedMeshBounds.center );
-			float meshCircumradius = 0;
-			for( int j=0; j<meshAreaLight.Vertices.Length; j++ )
-			{
-				float distance = Vector3.Distance( meshCircumcenter, _propertyValue[vertexBufferOffset+j] );
-				meshCircumradius = Mathf.Max( meshCircumradius, distance );
-			}
-			_propertyValue[batchIndex*5+4].Set( meshCircumcenter.x, meshCircumcenter.y, meshCircumcenter.z, meshCircumradius );
-
-			vertexBufferOffset += ( meshAreaLight.Vertices.Length );
-			batchIndex++;
-		}
-
-		_bufferSizes.Set( NumPolygons, 0, 0, 0 );
-		Shader.SetGlobalVector( "_PALBufferSizes", _bufferSizes );
-
-		#if UNITY_5_4_OR_NEWER
-			Shader.SetGlobalVectorArray( "_PALBuffer", _propertyValue );
-		#else
-			for( int i=0; i<BufferSize; i++ )
-			{
-				Shader.SetGlobalVector( _propertyId[i], _propertyValue[i] );
-			}
-		#endif
-
-		switch( _meshAreaLights[0].ProjectionMode )
-		{
-		case ProjectionMode.Centered:
-			Shader.DisableKeyword( "_PAL_PROJECTION_WEIGHTED" );
-			break;
-		case ProjectionMode.Weighted:
-			Shader.EnableKeyword( "_PAL_PROJECTION_WEIGHTED" );
-			break;
-		default:
-			break;
+			return _sharedMeshBounds;
 		}
 	}
-	#endregion
+
+	public Vector3 PolygonNormal
+	{
+		get
+		{
+			Vector3 v0 = _sharedMeshVertices[_sharedMeshTriangles[0]];
+			Vector3 v1 = _sharedMeshVertices[_sharedMeshTriangles[1]];
+			Vector3 v2 = _sharedMeshVertices[_sharedMeshTriangles[2]];
+			Vector3 meshNormal = Vector3.Cross( v1-v0, v2-v0 );
+			meshNormal = _thisTransform.localToWorldMatrix.MultiplyVector( meshNormal ).normalized;
+			return meshNormal;
+		}
+	}
+
+	public Vector3 PolygonCentroid
+	{
+		get
+		{
+			Matrix4x4 localToWorldMatrix = _thisTransform.localToWorldMatrix;
+			Vector3 centroid = Vector3.zero;
+			for( int j=0; j<Vertices.Length; j++ )
+			{
+				centroid += localToWorldMatrix.MultiplyPoint( _sharedMeshVertices[Vertices[j]] );
+			}
+			centroid *= 1.0f / Vertices.Length;
+			return centroid;
+		}
+	}
+
+	public Vector4 PolygonCircumcircle
+	{
+		get
+		{
+			Matrix4x4 localToWorldMatrix = _thisTransform.localToWorldMatrix;
+			Vector3 meshNormal = PolygonNormal;
+			Vector3 meshBoundsExtents = _sharedMeshBounds.extents - meshNormal * Vector3.Dot( _sharedMeshBounds.extents, meshNormal );
+			Vector3 meshCircumcenter = localToWorldMatrix.MultiplyPoint( _sharedMeshBounds.center );
+			float meshCircumradius = 0;
+			for( int j=0; j<Vertices.Length; j++ )
+			{
+				Vector3 vertex = localToWorldMatrix.MultiplyPoint( _sharedMeshVertices[Vertices[j]] );
+				float distance = Vector3.Distance( meshCircumcenter, vertex );
+				meshCircumradius = Mathf.Max( meshCircumradius, distance );
+			}
+			return new Vector4( meshCircumcenter.x, meshCircumcenter.y, meshCircumcenter.z, meshCircumradius );
+		}
+	}
+
+	public void PrepareIrradianceTransfer()
+	{
+		/*
+		UpdateBatch( this );
+		*/
+		UpdatePolygonalAreaLight();
+		PALBatchBuilder.ExclusiveUpdate( _polygonalAreaLight );
+	}
+	#endregion	
 }

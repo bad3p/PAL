@@ -116,4 +116,81 @@ float4 PALDiffuseContribution(float3 worldPos, float3 worldNormal)
 	return diffuseColor;
 }
 
+float PALIntensity(float3 worldPos, float3 worldNormal)
+{
+	float4 fragmentPlane = float4( worldNormal, -dot( worldNormal, worldPos ) );
+
+	int numPolygons = PAL_NUM_POLYGONS;
+
+	float result = 0; 
+
+	for( int i=0; i<numPolygons; i++ )
+	{
+		float4 polygonDesc = PAL_POLYGON_DESC(i);
+		float4 polygonColor = PAL_POLYGON_COLOR(i);
+		float4 polygonNormal = PAL_POLYGON_NORMAL(i);
+		float4 polygonCentroid = PAL_POLYGON_CENTROID(i);
+		float4 polygonCircumcircle = PAL_POLYGON_CIRCUMCIRCLE(i);
+		float polygonCircumradius = polygonCircumcircle.w;
+
+		int firstVertexIndex = (int)polygonDesc.x;
+		int lastVertexIndex = (int)polygonDesc.y;
+		float intensity = polygonDesc.z;
+		float bias = polygonDesc.w;
+		float coherencyTreshold = polygonNormal.w;
+
+		float3 pointOnPolygon = polygonCentroid.xyz;
+
+		#if defined(_PAL_PROJECTION_WEIGHTED)
+			float3 weightedPointOnPolygon = 0;
+			float weightSum = 0;
+			for( int j=firstVertexIndex; j<lastVertexIndex; j++ )
+			{
+				float3 polygonVertex = _PALBuffer[j].xyz;
+				float weight = 1.0 / distance( polygonVertex, worldPos );
+				weightSum += weight;
+				weightedPointOnPolygon += polygonVertex * weight;
+			}
+			weightedPointOnPolygon *= 1.0 / weightSum;
+			pointOnPolygon = weightedPointOnPolygon;
+		#endif
+
+		float3 projectionBasisZ = normalize( pointOnPolygon - worldPos );
+		float sideCondition = dot( projectionBasisZ, polygonNormal );
+		if( sideCondition < 0 )
+		{
+			float3 projectionBasisY = float3( projectionBasisZ.y, projectionBasisZ.z, -projectionBasisZ.x );
+			float3 projectionBasisX = normalize( cross( projectionBasisY, projectionBasisZ ) );
+			projectionBasisY = normalize( cross( projectionBasisZ, projectionBasisX ) );
+
+			float3 biasOffset = projectionBasisZ * polygonCircumradius * bias;
+			float3 biasedWorldPos = worldPos - biasOffset;
+
+			float polygonArea = 0;
+
+			float3 v0 = _PALBuffer[firstVertexIndex].xyz - biasedWorldPos;
+			v0 = float3( dot( v0, projectionBasisX ), dot( v0, projectionBasisY ), dot( v0, projectionBasisZ ) );
+			v0.xy /= v0.z;
+
+			for( int j=firstVertexIndex+1; j<lastVertexIndex; j++ )
+			{
+				float3 v1 = _PALBuffer[j].xyz - biasedWorldPos; 
+				v1 = float3( dot( v1, projectionBasisX ), dot( v1, projectionBasisY ), dot( v1, projectionBasisZ ) );
+				v1.xy /= v1.z;
+
+				polygonArea += v0.x*v1.y - v1.x*v0.y; 
+
+				v0 = v1; 
+			}
+
+			float coherencyFactor = abs( dot( -projectionBasisZ, polygonNormal ) );
+			coherencyFactor = saturate( ( coherencyFactor - coherencyTreshold ) / coherencyTreshold );
+
+			result += -0.5 * polygonArea * intensity * coherencyFactor * PALLocalOcclusion( polygonCircumcircle, fragmentPlane );
+		}
+	}
+
+	return result;
+}
+
 #endif

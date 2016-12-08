@@ -42,9 +42,9 @@ public class MeshAreaLightEditor : Editor
 	public override void OnInspectorGUI()
 	{
 		GUILayout.Label( "Batch stats:" );
-		GUILayout.Label( "Num polygons: " + MeshAreaLight.NumPolygons );
-		GUILayout.Label( "Num vertices: " + MeshAreaLight.NumVertices );
-		GUILayout.Label( "Buffer size: " + MeshAreaLight.BufferSize );
+		GUILayout.Label( "Num polygons: " + PALBatchBuilder.NumPolygons );
+		GUILayout.Label( "Num vertices: " + PALBatchBuilder.NumVertices );
+		GUILayout.Label( "Buffer size: " + PALBatchBuilder.BufferSize );
 
 		DrawDefaultInspector();
 

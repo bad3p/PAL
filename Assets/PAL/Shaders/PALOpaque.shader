@@ -42,7 +42,7 @@ Shader "PAL/Opaque"
 		
 		Pass
 		{
-			Name "ForwardBase" 
+			Name "ForwardBase"
 			Tags { "LightMode"="ForwardBase" }
 			Blend One Zero
     		
@@ -55,6 +55,7 @@ Shader "PAL/Opaque"
 
 			#pragma multi_compile _ _PAL_BUMPY
 			#pragma multi_compile _ _PAL_PROJECTION_WEIGHTED
+			#pragma multi_compile _ _PAL_ALBEDO
 			#pragma multi_compile_fog
 
 			#include "UnityCG.cginc"
@@ -128,22 +129,26 @@ Shader "PAL/Opaque"
 
 			float4 frag (v2f i) : SV_Target  
 			{
-				float4 result = tex2D( _MainTex, i.uv );
-
-				#if defined(_PAL_BUMPY)
-					float3 tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv ) ).xyz;
-					float3 worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
+				#if defined(_PAL_ALBEDO)
+					return tex2D( _MainTex, i.uv );
 				#else
-					float3 worldNormal = normalize( i.worldNormal );
+					float4 result = tex2D( _MainTex, i.uv );
+
+					#if defined(_PAL_BUMPY)
+						float3 tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv ) ).xyz;
+						float3 worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
+					#else
+						float3 worldNormal = normalize( i.worldNormal );
+					#endif
+
+					result.xyz *= ( UNITY_LIGHTMODEL_AMBIENT + PALDiffuseContribution( i.worldPos, worldNormal ) );
+
+					#if defined(FOG_LINEAR) || defined(FOG_EXP) || defined(FOG_EXP2)
+                		UNITY_APPLY_FOG( i.fogCoord, result ); 
+                	#endif
+
+					return result;
 				#endif
-
-				result *= ( UNITY_LIGHTMODEL_AMBIENT + PALDiffuseContribution( i.worldPos, worldNormal ) );
-
-				#if defined(FOG_LINEAR) || defined(FOG_EXP) || defined(FOG_EXP2)
-                	UNITY_APPLY_FOG( i.fogCoord, result ); 
-                #endif
-
-				return result;
 			}
 			ENDCG
 		}
