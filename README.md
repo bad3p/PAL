@@ -1,3 +1,9 @@
+# REAL-TIME IRRADIANCE TRANSFER
+
+![Example](https://github.com/bad3p/PAL/blob/master/Docs/Images/IrradianceTransfer.jpg?raw=true)
+
+First workable variant of irradiance transfer using polygonal area lights.
+
 # POLYGONAL AREA LIGHTS.
 
 ![Example](https://media.licdn.com/mpr/mpr/AAEAAQAAAAAAAAfcAAAAJDQ5MGQyNzE4LTk3NDYtNDRiOS1hZTMxLTNiNWY2ZmJlN2NkYw.png)
