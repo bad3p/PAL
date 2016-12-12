@@ -38,7 +38,7 @@ public class PolygonalAreaLight
 	public int BatchIndex = 0;
 };
 
-public class PALBatchBuilder
+static public class PALBatchBuilder
 {
 	#region Interface
 	private static List<PolygonalAreaLight> _polygonalAreaLights = null;
@@ -211,6 +211,11 @@ public class PALBatchBuilder
 			}
 		}
 
+		if( _propertyValue.Length != ShaderConstantBufferSize )
+		{
+			_propertyValue = new Vector4[ShaderConstantBufferSize];
+		}
+
 		int numPolygonsEx = 0;
 		int numVerticesEx = 0;
 		int bufferSizeEx = 0;
@@ -232,7 +237,14 @@ public class PALBatchBuilder
 		{
 			for( int j=0; j<polygonalAreaLight.Vertices.Length; j++ )
 			{
+				try
+				{
 				_propertyValue[vertexBufferOffset+j] = polygonalAreaLight.Vertices[j];
+				}
+				catch( System.IndexOutOfRangeException )
+				{
+					Debug.LogError( "Woops! vertexBufferOffset+j = " + (vertexBufferOffset+j).ToString() + " j = " + j.ToString() );
+				}
 			}
 
 			// descriptor

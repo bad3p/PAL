@@ -241,9 +241,6 @@ public class MeshAreaLight : MonoBehaviour
 
 	public void PrepareIrradianceTransfer()
 	{
-		/*
-		UpdateBatch( this );
-		*/
 		UpdatePolygonalAreaLight();
 		PALBatchBuilder.ExclusiveUpdate( _polygonalAreaLight );
 	}
