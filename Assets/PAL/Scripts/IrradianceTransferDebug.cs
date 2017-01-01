@@ -28,6 +28,7 @@ using System.Collections.Generic;
 [RequireComponent(typeof(MeshAreaLight))]
 public partial class IrradianceTransfer : MonoBehaviour
 {
+	/*
 	void PrintPolygonMap(string name)
 	{
 		System.IO.StreamWriter streamWriter = new System.IO.StreamWriter( "PolygonMap_" + name + ".txt", false, System.Text.Encoding.ASCII );
@@ -111,5 +112,5 @@ public partial class IrradianceTransfer : MonoBehaviour
 		}
 
 		streamWriter.Close();
-	}
+	}*/
 }

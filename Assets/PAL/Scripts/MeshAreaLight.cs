@@ -171,7 +171,6 @@ public class MeshAreaLight : MonoBehaviour
 		_polygonalAreaLight.Centroid *= 1.0f / _polygonalAreaLight.Vertices.Length;
 
 		// circumcircle
-		Vector3 meshBoundsExtents = _sharedMeshBounds.extents - _polygonalAreaLight.Normal * Vector3.Dot( _sharedMeshBounds.extents, _polygonalAreaLight.Normal );
 		Vector3 meshCircumcenter = meshAreaLightTransform.MultiplyPoint( _sharedMeshBounds.center );
 		float meshCircumradius = 0;
 		for( int j=0; j<_polygonalAreaLight.Vertices.Length; j++ )
@@ -225,8 +224,6 @@ public class MeshAreaLight : MonoBehaviour
 		get
 		{
 			Matrix4x4 localToWorldMatrix = _thisTransform.localToWorldMatrix;
-			Vector3 meshNormal = PolygonNormal;
-			Vector3 meshBoundsExtents = _sharedMeshBounds.extents - meshNormal * Vector3.Dot( _sharedMeshBounds.extents, meshNormal );
 			Vector3 meshCircumcenter = localToWorldMatrix.MultiplyPoint( _sharedMeshBounds.center );
 			float meshCircumradius = 0;
 			for( int j=0; j<Vertices.Length; j++ )

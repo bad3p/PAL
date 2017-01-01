@@ -41,10 +41,10 @@ public class MeshAreaLightEditor : Editor
 
 	public override void OnInspectorGUI()
 	{
-		GUILayout.Label( "Batch stats:" );
-		GUILayout.Label( "Num polygons: " + PALBatchBuilder.NumPolygons );
-		GUILayout.Label( "Num vertices: " + PALBatchBuilder.NumVertices );
-		GUILayout.Label( "Buffer size: " + PALBatchBuilder.BufferSize + "/" + PALBatchBuilder.ShaderConstantBufferSize );
+		EditorGUILayout.LabelField( "Batch stats:" );
+		EditorGUILayout.LabelField( "Num polygons: " + PALBatchBuilder.NumPolygons );
+		EditorGUILayout.LabelField( "Num vertices: " + PALBatchBuilder.NumVertices );
+		EditorGUILayout.LabelField( "Buffer size: " + PALBatchBuilder.BufferSize + "/" + PALBatchBuilder.ShaderConstantBufferSize );
 
 		DrawDefaultInspector();
 
@@ -56,5 +56,7 @@ public class MeshAreaLightEditor : Editor
 				otherMeshAreaLight.ProjectionMode = thisMeshAreaLight.ProjectionMode;
 			}
 		}
+
+		Repaint();
 	}
 }

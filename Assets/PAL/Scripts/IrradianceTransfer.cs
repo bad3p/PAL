@@ -29,6 +29,7 @@ public enum IrradianceMapResolution
 {
 	_16x16,
 	_32x32,
+	_48x48,
 	_64x64,
 	_96x96,
 	_128x128,
@@ -36,7 +37,7 @@ public enum IrradianceMapResolution
 	_256x256
 };
 
-static public class AngularMeter
+static public class PALUtils
 {	
 	public static float GetAngle(this Vector3 thisVector, Vector3 otherVector)
 	{
@@ -54,7 +55,41 @@ static public class AngularMeter
 		}
 		return angle;
 	}
-}
+
+	public static void MemSet<T>(ref T[] array, T value)
+	{
+		const int StartBlockSize = 32;
+
+		int numStartIterations = Mathf.Min( StartBlockSize, array.Length );
+		for( int i=0; i<numStartIterations; i++ )
+		{
+			array[i] = value;
+		}
+
+		if( array.Length <= StartBlockSize )
+		{
+			return;
+		}
+
+		int blockIndex = StartBlockSize;
+		int blockSize = StartBlockSize;
+		int arrayLength = array.Length;
+
+		while( blockIndex < arrayLength )
+		{
+			System.Buffer.BlockCopy( array, 0, array, blockIndex, Mathf.Min( blockSize, arrayLength-blockIndex ) );
+			blockIndex += blockSize;
+			blockSize *= 2;
+		}
+	}
+
+	public static void Swap<T>(ref T value0, ref T value1)
+	{
+		T temp = value0;
+		value0 = value1;
+		value1 = temp;
+	}
+};
 
 [RequireComponent(typeof(MeshAreaLight))]
 public partial class IrradianceTransfer : MonoBehaviour
@@ -70,17 +105,71 @@ public partial class IrradianceTransfer : MonoBehaviour
 	#region Constants
 	// algorithm constants
 	const float IlluminationBufferIntensityScale = 0.125f;
-	const int   IrradiancePolygonSmoothing = 4;
-	const float OutlineOffset = 0.25f;
+	const float OutlineOffset = 0.125f;
 
 	// RGBA-to-float decoding constants (from UnityCG.cginc) for Color32 values
 	const float kDecodeRedFactor = (1/255.0f);
 	const float kDecodeGreenFactor = (1/255.0f)/255f; 
 	const float kDecodeBlueFactor = (1/65025.0f)/255f;
 	const float kDecodeAlphaFactor = (1/16581375.0f)/255f;
+
+	// ComputeShader constants
+	const int GPUGroupSize = 128;
+	const int GPUSmoothSteps = 2; // this is the base value, resolutions larger than 16x16 will use increased amount of smooth steps
+	const int GPUMergeEvenVerticesThreshold = 12;
+	const int GPUMergeSparseVerticesThreshold = 24;
+	const float GPUSemiParallelEdgeAngle0 = 0.1f;//0.5f;
+	const float GPUSemiParallelEdgeAngle1 = 1.0f;//1.5f;
+	const float GPUSemiParallelEdgeAngle2 = 2.0f;//4.5f;
+	const float GPUEdgeRatio0 = 0.1f;
+	const float GPUEdgeAngle0 = 160.0f;
+	const float GPUEdgeRatio1 = 0.25f;
+	const float GPUEdgeAngle1 = 75.0f;
+	const float GPUEdgeRatio2 = 0.5f;
+	const float GPUEdgeAngle2 = 60.0f;
 	#endregion
 
 	#region EmbeddedTypes
+	public struct PolygonPlane
+	{
+		public Vector3 position;    // 3 * sizeof(float) = 12
+		public Vector3 normal;      // 3 * sizeof(float) = 12
+
+		public const int SizeOf = 24; // stride = 24
+	};
+
+	public struct Vertex
+	{
+		public uint    flag;           // sizeof(int) = 4
+		public uint    localIndex;     // sizeof(int) = 4
+		public uint    lastLocalIndex; // sizeof(int) = 4
+		public Vector3 position;       // 3 * sizeof(float) = 12
+
+		public const int SizeOf = 24; // stride = 24
+	};
+
+	public class VertexBuffer
+	{
+		public Vertex[] vertices;
+
+		public int Length { get { return vertices.Length; } }
+
+		public VertexBuffer() 
+		{ 
+			vertices = new Vertex[0]; 
+		}
+
+		public VertexBuffer(int bufferSize) 
+		{
+			vertices = new Vertex[bufferSize];
+		}
+
+		public void Resize(int newBufferSize)
+		{
+			System.Array.Resize<Vertex>( ref vertices, newBufferSize );
+		}
+	};
+
 	public struct PixelCoords
 	{
 		public int x;
@@ -97,72 +186,95 @@ public partial class IrradianceTransfer : MonoBehaviour
 
 	public class IrradiancePolygon : PolygonalAreaLight
 	{
-		public int       polygonIndex = 0;
-		public int       totalPixels = 0;
-		public float     totalIllumination = 0.0f;
-		public int       totalRed = 0;
-		public int       totalGreen = 0;
-		public int       totalBlue = 0;
-		public Plane     polygonPlane = new Plane();
-		public Vector3[] smoothVertices = new Vector3[0];
-		public bool[]    vertexFlags = new bool[0];
+		public int           polygonIndex = 0;
+		public int           totalPixels = 0;
+		public float         totalIllumination = 0.0f;
+		public int           totalRed = 0;
+		public int           totalGreen = 0;
+		public int           totalBlue = 0;
+		public Vector3       polygonPlaneNormal = Vector3.zero;
+		public Vector3       pointOnPolygonPlane = Vector3.zero;
+		public int           numPlanePixels = 0;
+		public PixelCoords[] planePixels = new PixelCoords[] { PixelCoords.zero, PixelCoords.zero, PixelCoords.zero };
+		public Vector3[]     worldSpacePixelPos = new Vector3[] { Vector3.zero, Vector3.zero, Vector3.zero };
+		public PixelCoords   marchingSquaresInf = new PixelCoords( int.MaxValue, int.MaxValue );
+		public PixelCoords   marchingSquaresSup = new PixelCoords( int.MinValue, int.MinValue );
+		public PixelCoords   leftmostPixelCoords = new PixelCoords( int.MaxValue, int.MaxValue );
 	};
 	#endregion
 
 	#region PublicFields
 	[Header("Settings")]
+	[Tooltip("Resolution of auxiliary render textures.")]
 	public IrradianceMapResolution Resolution = IrradianceMapResolution._32x32;
 
 	[Range(0.0f, 2.0f)]
+	[Tooltip("Controls boundaries of light spots used as secondary area lights.")]
 	public float BounceIntensityTreshold = 0.5f;
 
-	[Range(0.0f, 2.0f)]
+	[Range(1.0f, 2.5f)]
+	[Tooltip("Bias of secondary area lights helps to reduce artifacts of irradiance transfer.")]
 	public float IrradianceBias = 0.0f;
 
 	[Range(0.0f, 5.0f)]
+	[Tooltip("Use this in combination with bias to correct intensity of irradiance transfer.")]
 	public float IrradianceIntensityMultiplier = 1.0f;
 
 	[Range(90.0f, 165.0f)]
+	[Tooltip("Use wider field of view to transfer irradiance from larger part of scenery, but it costs in details of secondary area lights. Narrow field of view provides more detailed secondary area lights, but smaller part of scenery will transfer irradiance.")]
 	public float OffscreenCameraFOV = 145.0f;
 	#endregion
 
 	#region PrivateFields
-	Transform             _thisTransform = null;
-	Vector3               _prevTransformFingerprint = new Vector3( float.MaxValue, float.MaxValue, float.MaxValue );
-	float                 _prevIntensity = float.MaxValue;
-	Vector2               _irradianceMapBufferResolution = Vector2.zero;
-	Vector2               _irradianceMapInvBufferResolution = Vector2.zero;
-	Vector4               _irradianceMapPixelSize = Vector4.zero;
-	MeshAreaLight         _meshAreaLight;
-	Shader                _albedoBufferShader;
-	Shader                _depthBufferShader;
-	Shader                _normalBufferShader;
-	Shader                _geometryBufferShader;
-	Shader                _mergeBufferShader;
-	Shader                _illuminationBufferShader;
-	Material              _mergeBufferMaterial;
-	Camera                _offscreenCamera;
-	RenderTexture         _albedoBuffer;
-	RenderTexture         _depthBuffer;
-	RenderTexture         _normalBuffer;
-	RenderTexture         _mergeBuffer;
-	RenderTexture         _geometryBuffer;
-	RenderTexture         _illuminationBuffer;
-	Texture2D             _transferBuffer;
-	Color32[]             _albedoBufferPixels = new Color32[0];
-	Color32[]             _depthBufferPixels = new Color32[0];
-	Color32[]             _mergeBufferPixels = new Color32[0];
-	Color32[]             _illuminationBufferPixels = new Color32[0];
-	int                   _numPolygons = 0;
-	int[]                 _polygonMap = new int[0];
-	int[]                 _polygonMergeMap = new int[0];
-	int[]                 _polygonSize = new int[0];
-	bool[]                _thresholdMap = new bool[0];
-	ushort[]              _contourMap = new ushort[0];
-	IrradiancePolygon[]   _irradiancePolygons = new IrradiancePolygon[0];
+	Transform                _thisTransform = null;
+	Vector3                  _prevTransformFingerprint = new Vector3( float.MaxValue, float.MaxValue, float.MaxValue );
+	float                    _prevIntensity = float.MaxValue;
+	Vector2                  _irradianceMapBufferResolution = Vector2.zero;
+	Vector2                  _irradianceMapInvBufferResolution = Vector2.zero;
+	Vector4                  _irradianceMapPixelSize = Vector4.zero;
+	MeshAreaLight            _meshAreaLight;
+	Shader                   _albedoBufferShader;
+	Shader                   _depthBufferShader;
+	Shader                   _normalBufferShader;
+	Shader                   _geometryBufferShader;
+	Shader                   _mergeBufferShader;
+	Shader                   _illuminationBufferShader;
+	Material                 _mergeBufferMaterial;
+	Camera                   _offscreenCamera;
+	RenderTexture            _albedoBuffer;
+	RenderTexture            _depthBuffer;
+	RenderTexture            _normalBuffer;
+	RenderTexture            _mergeBuffer;
+	RenderTexture            _geometryBuffer;
+	RenderTexture            _illuminationBuffer;
+	Texture2D                _transferBuffer;
+	Color32[]                _albedoBufferPixels = new Color32[0];
+	Color32[]                _depthBufferPixels = new Color32[0];
+	Color32[]                _mergeBufferPixels = new Color32[0];
+	Color32[]                _illuminationBufferPixels = new Color32[0];
+	int                      _numPolygons = 0;
+	int[]                    _polygonMap = new int[0];
+	int[]                    _polygonMergeMap = new int[0];
+	int[]                    _polygonSize = new int[0];
+	IrradiancePolygon[]      _irradiancePolygons = new IrradiancePolygon[0];
+	byte[]                   _contourMap = new byte[0];
+	private ComputeBuffer    _polygonMapBuffer = null;
+	private ComputeBuffer    _contourBuffer = null;
+	private uint[]           _packedContourMap = new uint[0];
+	private ComputeBuffer    _inVertexBuffer = null;
+	private ComputeBuffer    _outVertexBuffer = null;
+	private ComputeBuffer    _polygonPlaneBuffer = null;
+	private VertexBuffer     _readWriteVertexBuffer = new VertexBuffer();
+	private VertexBuffer     _readOnlyVertexBuffer = new VertexBuffer();
+	private VertexBuffer     _writeOnlyVertexBuffer = new VertexBuffer();
+	private PolygonPlane[]   _polygonPlanes = new PolygonPlane[0];
+	private ComputeShader    _computeShader = null;
+	int                      _numBatchVertices = 0;
+	int                      _numBatchPolygons = 0;
 	#endregion
 
 	#region MarchingSquares
+	static uint[] ContourMask = new uint[8] { 0x0000000F, 0x000000F0, 0x00000F00, 0x0000F000, 0x000F0000, 0x00F00000, 0x0F000000, 0xF0000000 };
 	#endregion
 
 	#region MonoBehaviour
@@ -192,6 +304,22 @@ public partial class IrradianceTransfer : MonoBehaviour
 
 	void OnDestroy()
 	{
+		_polygonMapBuffer.Release();
+		_contourBuffer.Release();
+
+		if( _inVertexBuffer != null )
+		{
+			_inVertexBuffer.Release();
+		}
+		if( _outVertexBuffer != null )
+		{
+			_outVertexBuffer.Release();
+		}
+		if( _polygonPlaneBuffer != null )
+		{
+			_polygonPlaneBuffer.Release();
+		}
+
 		for( int i=0; i<_irradiancePolygons.Length; i++ )
 		{
 			if( _irradiancePolygons[i] != null )
@@ -204,10 +332,6 @@ public partial class IrradianceTransfer : MonoBehaviour
 	void Start()
 	{
 		_meshAreaLight = GetComponent<MeshAreaLight>();
-		Bounds polygonBounds = _meshAreaLight.PolygonBounds;
-		Vector3 x = _meshAreaLight.transform.localToWorldMatrix.MultiplyVector( Vector3.right ) * polygonBounds.extents.x;
-		Vector3 y = _meshAreaLight.transform.localToWorldMatrix.MultiplyVector( Vector3.up ) * polygonBounds.extents.y;
-		Vector3 z = _meshAreaLight.transform.localToWorldMatrix.MultiplyVector( Vector3.forward ) * polygonBounds.extents.z;
 
 		GameObject offscreenCameraObject = new GameObject("OffscreenCamera");
 		offscreenCameraObject.hideFlags = HideFlags.HideAndDontSave;// HideFlags.DontSave; // 
@@ -253,8 +377,19 @@ public partial class IrradianceTransfer : MonoBehaviour
 		_polygonMap = new int[bufferWidth*bufferHeight];
 		_polygonMergeMap = new int[bufferWidth*bufferHeight];
 		_polygonSize = new int[bufferWidth*bufferHeight];
-		_thresholdMap = new bool[bufferWidth*bufferHeight];
-		_contourMap = new ushort[(bufferWidth-1)*(bufferHeight-1)];
+		_contourMap = new byte[(bufferWidth-1)*(bufferHeight-1)];
+
+		if( SystemInfo.supportsComputeShaders )
+		{
+			_polygonMapBuffer = new ComputeBuffer( bufferWidth * bufferHeight, sizeof(int) );
+			_contourBuffer = new ComputeBuffer( (bufferWidth-1) * (bufferHeight-1), sizeof(uint) );
+			_packedContourMap = new uint[(bufferWidth-1)*(bufferHeight-1)];
+			_readWriteVertexBuffer = new VertexBuffer( GPUGroupSize );
+			_readOnlyVertexBuffer = new VertexBuffer( GPUGroupSize );
+			_writeOnlyVertexBuffer = new VertexBuffer( GPUGroupSize );
+			_polygonPlanes = new PolygonPlane[32];
+			_computeShader = Resources.Load<ComputeShader>( "Shaders/PAL" );
+		}
 
 		AlbedoBuffer = _albedoBuffer;
 		DepthBuffer = _depthBuffer;
@@ -271,10 +406,10 @@ public partial class IrradianceTransfer : MonoBehaviour
 		transformChanged = transformChanged || ( _offscreenCamera.fieldOfView != OffscreenCameraFOV );
 		bool intensityChanged = Mathf.Abs( _meshAreaLight.Intensity - _prevIntensity ) > Mathf.Epsilon;
 
-		#if true
+#if true
 		transformChanged = true;
 		intensityChanged = true;
-		#endif
+#endif
 
 		if( !transformChanged && !intensityChanged )
 		{
@@ -311,7 +446,14 @@ public partial class IrradianceTransfer : MonoBehaviour
 
 		CreateSecondaryAreaLights( ref marchingSquaresInf, ref marchingSquaresSup );
 
-		EmbarassedMarchingSquares( marchingSquaresInf, marchingSquaresSup );
+		if( SystemInfo.supportsComputeShaders )
+		{
+			MarchingSquaresGPU( marchingSquaresInf, marchingSquaresSup );
+		}
+		else
+		{
+			MarchingSquaresCPU( marchingSquaresInf, marchingSquaresSup );
+		}
 
 		Color averageAlbedo = Color.black;
 		for( int polygonIndex=0; polygonIndex<_irradiancePolygons.Length; polygonIndex++ )
@@ -319,18 +461,9 @@ public partial class IrradianceTransfer : MonoBehaviour
 			var irradiancePolygon = _irradiancePolygons[polygonIndex];
 			if( irradiancePolygon == null ) continue;
 
-			SmoothPolygon( irradiancePolygon );
-			int numVertices = ReduceSemiParallelEdges( irradiancePolygon );
-
-#if false
-			CompressArrays( irradiancePolygon, numVertices );
-#else
-			CombineVertices( irradiancePolygon, numVertices );
-#endif
-
 			for( int index=0; index<irradiancePolygon.Vertices.Length; index++ )
 			{
-				irradiancePolygon.Vertices[index] += irradiancePolygon.polygonPlane.normal * 0.001f;
+				irradiancePolygon.Vertices[index] += irradiancePolygon.polygonPlaneNormal * 0.001f;
 			}
 
 			averageAlbedo.r = ( irradiancePolygon.totalRed / irradiancePolygon.totalPixels ) / 255.0f;
@@ -340,7 +473,7 @@ public partial class IrradianceTransfer : MonoBehaviour
 			irradiancePolygon.Color = _meshAreaLight.Color * averageAlbedo;
 			irradiancePolygon.Bias = IrradianceBias;
 			irradiancePolygon.Intensity = irradiancePolygon.totalIllumination / irradiancePolygon.totalPixels * IrradianceIntensityMultiplier;
-			irradiancePolygon.Normal = irradiancePolygon.polygonPlane.normal;
+			irradiancePolygon.Normal = irradiancePolygon.polygonPlaneNormal;
 			irradiancePolygon.ProjectionMode =_meshAreaLight.ProjectionMode;
 
 			irradiancePolygon.Centroid = Vector3.zero;
@@ -363,37 +496,28 @@ public partial class IrradianceTransfer : MonoBehaviour
 		}
 	}
 
-	static Color[] gizmoColors = new Color[]
-	{
-		Color.red,
-		Color.green,
-		Color.blue,
-		Color.yellow,
-		Color.cyan,
-		Color.magenta
-	};
-
 	void OnDrawGizmos()
 	{
 		for( int polygonIndex=0; polygonIndex<_irradiancePolygons.Length; polygonIndex++ )
 		{
 			var irradiancePolygon = _irradiancePolygons[polygonIndex];
 			if( irradiancePolygon != null )
-			{				
+			{
 				if( irradiancePolygon.Vertices.Length > 1 )
 				{
-					Gizmos.color = gizmoColors[polygonIndex%gizmoColors.Length];
+					Gizmos.color = irradiancePolygon.Color;
 					for( int i=1; i<irradiancePolygon.Vertices.Length; i++ )
 					{					
 						Gizmos.DrawLine( irradiancePolygon.Vertices[i-1], irradiancePolygon.Vertices[i] );
-						Gizmos.DrawCube( irradiancePolygon.Vertices[i-1], Vector3.one * 0.01f );
+						Gizmos.DrawCube( irradiancePolygon.Vertices[i], Vector3.one * 0.01f );
 					}
-					Gizmos.color = Color.white;
-					Gizmos.DrawLine( irradiancePolygon.Vertices[0], irradiancePolygon.Vertices[irradiancePolygon.Vertices.Length-1] );
 					Gizmos.DrawCube( irradiancePolygon.Vertices[0], Vector3.one * 0.01f );
+					Gizmos.DrawLine( irradiancePolygon.Vertices[0], irradiancePolygon.Vertices[irradiancePolygon.Vertices.Length-1] );
 				}
 			}
 		}
+
+		DrawVertexLabels();
 	}
 	#endregion
 }

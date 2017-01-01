@@ -21,6 +21,15 @@
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
+#define GAUSSIAN_SMOOTH
+#undef GAUSSIAN_SMOOTH
+
+#define SHOW_POLYGON_PROCESSING_PASSES
+#undef SHOW_POLYGON_PROCESSING_PASSES
+
+#define SHOW_VERTEX_LABELS
+#undef SHOW_VERTEX_LABELS
+
 using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
@@ -28,6 +37,7 @@ using System.Collections.Generic;
 [RequireComponent(typeof(MeshAreaLight))]
 public partial class IrradianceTransfer : MonoBehaviour
 {
+	#region Shared
 	void RenderBuffers(bool transformChanged, bool intensityChanged)
 	{
 		_meshAreaLight.PrepareIrradianceTransfer();
@@ -155,7 +165,7 @@ public partial class IrradianceTransfer : MonoBehaviour
 							_polygonMap[pixelIndex] = leftPolygonIndex;
 							if( lowerPixelIsMergeable && leftPolygonIndex > lowerPolygonIndex )
 							{
-								if( _polygonMergeMap[leftPolygonIndex] == leftPolygonIndex )
+								if( _polygonMergeMap[leftPolygonIndex] == leftPolygonIndex ) 
 								{
 									_polygonMergeMap[leftPolygonIndex] = lowerPolygonIndex;
 								}
@@ -202,7 +212,6 @@ public partial class IrradianceTransfer : MonoBehaviour
 		}
 
 		// collapse hierarchies of merge map and merge polygons
-
 		for( int i=0; i<_numPolygons; i++ )
 		{
 			int indexToCollapse = _polygonMergeMap[i];
@@ -218,7 +227,7 @@ public partial class IrradianceTransfer : MonoBehaviour
 				_polygonMergeMap[i] = indexToCollapse;
 			}
 		}
-
+		
 		for( int i=0; i<_polygonMap.Length; i++ )
 		{
 			int polygonIndex = _polygonMap[i];
@@ -238,8 +247,14 @@ public partial class IrradianceTransfer : MonoBehaviour
 		int bufferHeight = _depthBuffer.height;
 		int bufferWidth = _depthBuffer.width;
 
+		float farClipPlane = _offscreenCamera.farClipPlane;
+
+		Color32 depthPixel32;
 		Color32 irradiancePixel32;
 		Color32 albedoPixel32;
+		Vector3 viewPortSpacePixelPos = Vector3.zero;
+		Vector3 worldSpacePlaneTangent0 = Vector3.zero;
+		Vector3 worldSpacePlaneTangent1 = Vector3.zero;
 
 		// step 3 : filter out pixels illuminated above the given threshold of bounce intensity
 
@@ -247,11 +262,6 @@ public partial class IrradianceTransfer : MonoBehaviour
 		{
 			_irradiancePolygons = new IrradiancePolygon[_numPolygons];
 		}
-
-		//for( int i=0; i<_irradiancePolygons.Length; i++ )
-		//{
-			//_irradiancePolygons[i] = null;
-		//}
 
 		for( int y=0; y<bufferHeight; y++ )
 		{
@@ -280,15 +290,61 @@ public partial class IrradianceTransfer : MonoBehaviour
 							irradiancePolygon.polygonIndex = polygonIndex;
 							_irradiancePolygons[polygonIndex] = irradiancePolygon;
 						}
+
 						irradiancePolygon.totalPixels += 1;
 						irradiancePolygon.totalIllumination += illumination;
 						irradiancePolygon.totalRed += albedoPixel32.r;
 						irradiancePolygon.totalGreen += albedoPixel32.g;
 						irradiancePolygon.totalBlue += albedoPixel32.b;
-						marchingSquaresInf.x = Mathf.Min( marchingSquaresInf.x, x );
-						marchingSquaresInf.y = Mathf.Min( marchingSquaresInf.y, y );
-						marchingSquaresSup.x = Mathf.Max( marchingSquaresSup.x, x );
-						marchingSquaresSup.y = Mathf.Max( marchingSquaresSup.y, y );
+
+						irradiancePolygon.marchingSquaresInf.x = irradiancePolygon.marchingSquaresInf.x > x ? x : irradiancePolygon.marchingSquaresInf.x;
+						irradiancePolygon.marchingSquaresInf.y = irradiancePolygon.marchingSquaresInf.y > y ? y : irradiancePolygon.marchingSquaresInf.y;
+						irradiancePolygon.marchingSquaresSup.x = irradiancePolygon.marchingSquaresSup.x < x ? x : irradiancePolygon.marchingSquaresSup.x;
+						irradiancePolygon.marchingSquaresSup.y = irradiancePolygon.marchingSquaresSup.y < y ? y : irradiancePolygon.marchingSquaresSup.y;
+
+						if( irradiancePolygon.leftmostPixelCoords.x > x )
+						{
+							irradiancePolygon.leftmostPixelCoords.x = x;
+							irradiancePolygon.leftmostPixelCoords.y = y;
+						}
+
+						if( irradiancePolygon.numPlanePixels < 3 )
+						{
+							irradiancePolygon.planePixels[irradiancePolygon.numPlanePixels].x = x;
+							irradiancePolygon.planePixels[irradiancePolygon.numPlanePixels].y = y;
+							depthPixel32 = _depthBufferPixels[pixelIndex];
+							viewPortSpacePixelPos.x = ( x + 0.5f ) * _irradianceMapInvBufferResolution.x;
+							viewPortSpacePixelPos.y = ( y + 0.5f ) * _irradianceMapInvBufferResolution.y;
+							viewPortSpacePixelPos.z = depthPixel32.r * kDecodeRedFactor + depthPixel32.g * kDecodeGreenFactor + depthPixel32.b * kDecodeBlueFactor + depthPixel32.a * kDecodeAlphaFactor;
+							viewPortSpacePixelPos.z = viewPortSpacePixelPos.z * farClipPlane;
+							irradiancePolygon.worldSpacePixelPos[irradiancePolygon.numPlanePixels] = _offscreenCamera.ViewportToWorldPoint( viewPortSpacePixelPos );
+
+							irradiancePolygon.numPlanePixels++;
+							if( irradiancePolygon.numPlanePixels == 3 )
+							{
+								if( ( irradiancePolygon.planePixels[0].x == irradiancePolygon.planePixels[1].x && irradiancePolygon.planePixels[1].x == irradiancePolygon.planePixels[2].x ) ||
+									( irradiancePolygon.planePixels[0].y == irradiancePolygon.planePixels[1].y && irradiancePolygon.planePixels[1].y == irradiancePolygon.planePixels[2].y ) )
+								{
+									irradiancePolygon.numPlanePixels--;
+								}
+								else
+								{
+									worldSpacePlaneTangent0 = ( irradiancePolygon.worldSpacePixelPos[1] - irradiancePolygon.worldSpacePixelPos[0] ).normalized;
+									worldSpacePlaneTangent1 = ( irradiancePolygon.worldSpacePixelPos[2] - irradiancePolygon.worldSpacePixelPos[0] ).normalized;
+										
+									const float AngleCosineThreshold = 0.9659258262890682867497431997289f;
+									if( Mathf.Abs( Vector3.Dot( worldSpacePlaneTangent0, worldSpacePlaneTangent1 ) ) > AngleCosineThreshold )
+									{
+										irradiancePolygon.numPlanePixels--;
+									}
+								}
+							}
+						}
+
+						marchingSquaresInf.x = marchingSquaresInf.x > x ? x : marchingSquaresInf.x;
+						marchingSquaresInf.y = marchingSquaresInf.y > y ? y : marchingSquaresInf.y;
+						marchingSquaresSup.x = marchingSquaresSup.x < x ? x : marchingSquaresSup.x;
+						marchingSquaresSup.y = marchingSquaresSup.y < y ? y : marchingSquaresSup.y;
 					}
 				}
 			}
@@ -299,304 +355,60 @@ public partial class IrradianceTransfer : MonoBehaviour
 			marchingSquaresSup.y = ( marchingSquaresSup.y < bufferHeight-1 ) ? ( marchingSquaresSup.y+1 ) : marchingSquaresSup.y;
 		}
 	}
+	#endregion
 
-	void SmoothPolygon(IrradiancePolygon irradiancePolygon)
+	#region MarchingSquaresCPU
+	void MarchingSquaresCPU(PixelCoords marchingSquaresInf, PixelCoords marchingSquaresSup)
 	{
-		// smooth
-		irradiancePolygon.smoothVertices = new Vector3[irradiancePolygon.Vertices.Length];
-		float planeFactor = 2 - Mathf.Abs( Vector3.Dot( _offscreenCamera.transform.forward, irradiancePolygon.polygonPlane.normal ) );
-		int numSmoothSteps = (int)(IrradiancePolygonSmoothing * planeFactor);
-		for( int i=0; i<numSmoothSteps; i++ )
-		{
-			for( int index=0; index<irradiancePolygon.Vertices.Length; index++ )
-			{
-				int prevIndex = ( index == 0 ) ? irradiancePolygon.Vertices.Length-1 : index-1;
-				int nextIndex = ( index == irradiancePolygon.Vertices.Length-1 ) ? 0 : index+1;
-				irradiancePolygon.smoothVertices[index] = ( irradiancePolygon.Vertices[prevIndex] + irradiancePolygon.Vertices[index] + irradiancePolygon.Vertices[nextIndex] ) / 3;
-			}
-			for( int index=0; index<irradiancePolygon.Vertices.Length; index++ )
-			{
-				irradiancePolygon.Vertices[index] = irradiancePolygon.smoothVertices[index];
-			}
-		}
-	}
-
-	int ReduceSemiParallelEdges(IrradiancePolygon irradiancePolygon)
-	{
-		// reduce semi-parallel edges
-
-		const float MinEdgeAngle = 15.0f;
-		const float ReductionAngle = 1.0f;
-
-		irradiancePolygon.vertexFlags = new bool[irradiancePolygon.Vertices.Length];
-		for( int index=0; index<irradiancePolygon.vertexFlags.Length; index++ ) 
-		{
-			irradiancePolygon.vertexFlags[index] = true;
-		}
-
-		float reductionAngle = 0.0f;
-		float reductionCosAngle = Mathf.Cos( reductionAngle * Mathf.Deg2Rad );
-		int numVertices = irradiancePolygon.Vertices.Length;
-		while( reductionAngle < MinEdgeAngle && numVertices > 4 )
-		{
-			int prevIndex = -1;
-			for( int index=0; index<irradiancePolygon.Vertices.Length; index++ )
-			{
-				if( irradiancePolygon.vertexFlags[index] )
-				{
-					prevIndex = index;
-					break;
-				}
-			}
-			if( prevIndex < 0 )
-			{
-				Debug.LogError( "prevIndex < 0" );
-				break;
-			}
-
-			int currIndex = -1;
-			for( int index=prevIndex+1; index<irradiancePolygon.Vertices.Length; index++ )
-			{
-				if( irradiancePolygon.vertexFlags[index] )
-				{
-					currIndex = index;
-					break;
-				}
-			}
-			if( currIndex < 0 )
-			{
-				Debug.LogError( "currIndex < 0" );
-				break;
-			}
-
-			int nextIndex = -1;
-			for( int index=currIndex+1; index<irradiancePolygon.Vertices.Length; index++ )
-			{
-				if( irradiancePolygon.vertexFlags[index] )
-				{
-					nextIndex = index;
-					break;
-				}
-			}
-			if( nextIndex < 0 )
-			{
-				Debug.LogError( "nextIndex < 0" );
-				break;
-			}
-
-			do
-			{
-				float cosAngle = Vector3.Dot( ( irradiancePolygon.Vertices[currIndex] - irradiancePolygon.Vertices[prevIndex] ).normalized, ( irradiancePolygon.Vertices[nextIndex] - irradiancePolygon.Vertices[currIndex] ).normalized );
-				if( cosAngle >= reductionCosAngle )
-				{
-					irradiancePolygon.vertexFlags[currIndex] = false;
-					numVertices--;
-				}
-
-				if( nextIndex < prevIndex )
-				{
-					break;
-				}
-
-				prevIndex = currIndex;
-				currIndex = nextIndex;
-				nextIndex = -1;
-
-				for( int index=currIndex+1; index<irradiancePolygon.Vertices.Length; index++ )
-				{
-					if( irradiancePolygon.vertexFlags[index] )
-					{
-						nextIndex = index;
-						break;
-					}
-				}
-
-				if( nextIndex < 0 )
-				{
-					for( int index=0; index<prevIndex; index++ )
-					{
-						if( irradiancePolygon.vertexFlags[index] )
-						{
-							nextIndex = index;
-							break;
-						}
-					}
-
-					if( nextIndex < 0 )
-					{
-						Debug.LogError( "nextIndex < 0 (in loop)" );
-						break;
-					}
-				}
-			}
-			while( numVertices > 4 );
-
-			reductionAngle += ReductionAngle;
-			reductionCosAngle = Mathf.Cos( reductionAngle * Mathf.Deg2Rad );
-		}
-
-		return numVertices;
-	}
-
-	void CompressArrays(IrradiancePolygon irradiancePolygon, int numVertices)
-	{
-		irradiancePolygon.Vertices = new Vector3[numVertices];
-		int reducedIndex = 0;
-		for( int index=0; index<irradiancePolygon.smoothVertices.Length; index++ )
-		{
-			if( irradiancePolygon.vertexFlags[index] )
-			{
-				irradiancePolygon.Vertices[reducedIndex] = irradiancePolygon.smoothVertices[index];
-				reducedIndex++;
-			}
-		}
-	}
-
-	void CombineVertices(IrradiancePolygon irradiancePolygon, int numVertices)
-	{
-		irradiancePolygon.Vertices = new Vector3[numVertices];
-
-		int originalIndex = 0;
-		int reducedIndex = 0;
-		while( originalIndex < irradiancePolygon.vertexFlags.Length )
-		{
-			if( irradiancePolygon.vertexFlags[originalIndex] ) 
-			{
-				int averagingStep = 0;
-				Vector3 averageVertex = Vector3.zero;
-				while( originalIndex < irradiancePolygon.vertexFlags.Length && irradiancePolygon.vertexFlags[originalIndex] )
-				{
-					Vector3 nextAverageVertex = ( averageVertex * averagingStep + irradiancePolygon.smoothVertices[originalIndex] ) / ( averagingStep + 1 );
-
-					if( averagingStep > 2 )
-					{
-						bool combinationIsValid = true;
-						for( int index=originalIndex-averagingStep; index<=originalIndex; index++ )
-						{
-							float distanceToAverageVertex = Vector3.Distance( irradiancePolygon.smoothVertices[index], nextAverageVertex );
-							float distanceBetweenVertices = ( index < originalIndex ) ? Vector3.Distance( irradiancePolygon.smoothVertices[index], irradiancePolygon.smoothVertices[index+1] ) : Vector3.Distance( irradiancePolygon.smoothVertices[index], irradiancePolygon.smoothVertices[index-1] );
-							if( distanceToAverageVertex > distanceBetweenVertices )
-							{
-								combinationIsValid = false;
-								break;
-							}
-						}
-
-						if( !combinationIsValid ) break;
-					}
-
-					averagingStep++;
-					averageVertex = nextAverageVertex;
-					originalIndex++;
-					numVertices--;
-					if( ( numVertices < 3 && reducedIndex < 1 ) || ( numVertices < 2 && reducedIndex < 2 ) ) break;
-				}
-
-				irradiancePolygon.Vertices[reducedIndex] = averageVertex;
-				reducedIndex++;
-			}
-			else
-			{
-				originalIndex++;
-			}
-		}
-
-		if( reducedIndex < irradiancePolygon.Vertices.Length )
-		{
-			System.Array.Resize<Vector3>( ref irradiancePolygon.Vertices, reducedIndex );
-		}
-	}
-
-	void EmbarassedMarchingSquares(PixelCoords marchingSquaresInf, PixelCoords marchingSquaresSup)
-	{
-		// build isolines using marching squares
-
-		const ushort Zero = 0;
-		const ushort BitMask0 = 8;
-		const ushort BitMask1 = 4;
-		const ushort BitMask2 = 2;
-		const ushort BitMask3 = 1;
+		const byte Zero = 0;
+		const byte BitMask0 = 8;
+		const byte BitMask1 = 4;
+		const byte BitMask2 = 2;
+		const byte BitMask3 = 1;
 
 		int bufferHeight = _depthBuffer.height;
 		int bufferWidth = _depthBuffer.width;
 
-		float farClipPlane = _offscreenCamera.farClipPlane;
+		// set polygons on map borders to -1
+		for( int i=0; i<bufferWidth; i++ )
+		{
+			_polygonMap[i] = -1;
+			_polygonMap[(bufferWidth)*(bufferHeight-1)+i] = -1;
+		}
+		for( int i=0; i<bufferHeight; i++ )
+		{
+			_polygonMap[bufferWidth*i] = -1;
+			_polygonMap[bufferWidth*i+bufferWidth-1] = -1;
+		}
 
-		int numPlanePixelCoords = 0;
-		PixelCoords[] planePixels = new PixelCoords[] { PixelCoords.zero, PixelCoords.zero, PixelCoords.zero };
-		Vector3[] worldSpacePixelPos = new Vector3[] { Vector3.zero, Vector3.zero, Vector3.zero };
-		Vector3 viewPortSpacePixelPos = Vector3.zero;
+		// number of vertices & polygons in all produced outlines
+		_numBatchVertices = 0;
+		_numBatchPolygons = 0;
+
+		int numPolygonVertices = 0;
 		Vector3 worldSpacePlaneNormal = Vector3.zero;
-		Color32 depthPixel32;
 
 		for( int polygonIndex=0; polygonIndex<_irradiancePolygons.Length; polygonIndex++ )
 		{
 			var irradiancePolygon = _irradiancePolygons[polygonIndex];
 			if( irradiancePolygon == null ) continue;
 
-			// fill threshold map & calculate world space normal of polygon
+			// location of this polygon's vertices in batch buffer
+			irradiancePolygon.BatchIndex = _numBatchVertices;
 
-			numPlanePixelCoords = 0;
+			// calculate plane of polygon in world space
 
-			for( int y=marchingSquaresInf.y; y<=marchingSquaresSup.y; y++ )
+			if( irradiancePolygon.numPlanePixels == 3 )
 			{
-				int leftMostPixelIndex = y*bufferWidth;
-				for( int x=marchingSquaresInf.x; x<=marchingSquaresSup.x; x++ )
-				{
-					int pixelIndex = leftMostPixelIndex + x;
-
-					if( _polygonMap[pixelIndex] == polygonIndex && x > 0 && y > 0 && x < bufferWidth-1 && y < bufferHeight-1 )
-					{
-						_thresholdMap[pixelIndex] = true;
-
-						if( numPlanePixelCoords < 3 )
-						{
-							planePixels[numPlanePixelCoords].x = x;
-							planePixels[numPlanePixelCoords].y = y;
-							depthPixel32 = _depthBufferPixels[pixelIndex];
-							viewPortSpacePixelPos.x = ( planePixels[numPlanePixelCoords].x + 0.5f ) * _irradianceMapInvBufferResolution.x;
-							viewPortSpacePixelPos.y = ( planePixels[numPlanePixelCoords].y + 0.5f ) * _irradianceMapInvBufferResolution.y;
-							viewPortSpacePixelPos.z = depthPixel32.r * kDecodeRedFactor + depthPixel32.g * kDecodeGreenFactor + depthPixel32.b * kDecodeBlueFactor + depthPixel32.a * kDecodeAlphaFactor;
-							viewPortSpacePixelPos.z = viewPortSpacePixelPos.z * farClipPlane;
-							worldSpacePixelPos[numPlanePixelCoords] = _offscreenCamera.ViewportToWorldPoint( viewPortSpacePixelPos );
-
-							numPlanePixelCoords++;
-							if( numPlanePixelCoords == 3 )
-							{
-								if( ( planePixels[0].x == planePixels[1].x && planePixels[1].x == planePixels[2].x ) ||
-									( planePixels[0].y == planePixels[1].y && planePixels[1].y == planePixels[2].y ) )
-								{
-									numPlanePixelCoords--;
-								}
-								else
-								{
-									Vector3 worldSpacePlaneTangent0 = ( worldSpacePixelPos[1] - worldSpacePixelPos[0] ).normalized;
-									Vector3 worldSpacePlaneTangent1 = ( worldSpacePixelPos[2] - worldSpacePixelPos[0] ).normalized;
-									if( Mathf.Abs( Vector3.Dot( worldSpacePlaneTangent0, worldSpacePlaneTangent1 ) ) > 0.9f )
-									{
-										numPlanePixelCoords--;
-									}
-								}
-							}
-
-						}
-					}
-					else
-					{
-						_thresholdMap[pixelIndex] = false;
-					}
-				}
-			}
-
-			if( numPlanePixelCoords == 3 )
-			{
-				worldSpacePlaneNormal = Vector3.Cross( (worldSpacePixelPos[1]-worldSpacePixelPos[0]).normalized, (worldSpacePixelPos[2]-worldSpacePixelPos[0]).normalized ).normalized;
-				worldSpacePlaneNormal *= -Mathf.Sign( Vector3.Dot( _offscreenCamera.transform.forward, worldSpacePlaneNormal ) );
-				irradiancePolygon.polygonPlane.SetNormalAndPosition( worldSpacePlaneNormal, worldSpacePixelPos[0] );
+				worldSpacePlaneNormal = Vector3.Cross( (irradiancePolygon.worldSpacePixelPos[1]-irradiancePolygon.worldSpacePixelPos[0]).normalized, (irradiancePolygon.worldSpacePixelPos[2]-irradiancePolygon.worldSpacePixelPos[0]).normalized ).normalized;
+				worldSpacePlaneNormal *= -Mathf.Sign( Vector3.Dot( ( irradiancePolygon.worldSpacePixelPos[0] - _offscreenCamera.transform.position ).normalized, worldSpacePlaneNormal ) );
+				irradiancePolygon.polygonPlaneNormal = worldSpacePlaneNormal;
+				irradiancePolygon.pointOnPolygonPlane = irradiancePolygon.worldSpacePixelPos[0];
 			}
 			else
 			{
 				// edge case : all the pixels lay on the same line
+				_irradiancePolygons[polygonIndex] = null;
 				continue;
 			}
 
@@ -605,24 +417,35 @@ public partial class IrradianceTransfer : MonoBehaviour
 			int leftMostXCoord = -1;
 			int leftMostContourIndex = -1;
 			int numContourCells = 0;
+			int contourIndex;
+			int pixelIndex0;
+			int pixelIndex1;
+			int pixelIndex2;
+			int pixelIndex3;
+			bool thresholdValue0;
+			bool thresholdValue1;
+			bool thresholdValue2;
+			bool thresholdValue3;
+
 			for( int y=marchingSquaresInf.y; y<marchingSquaresSup.y; y++ )
 			{
 				int leftMostCellIndex = y*(bufferWidth-1);
+
+				pixelIndex0 = (y+1)*bufferWidth + marchingSquaresInf.x;
+				pixelIndex3 = y*bufferWidth + marchingSquaresInf.x;
+				thresholdValue0 = ( _polygonMap[pixelIndex0] == polygonIndex );
+				thresholdValue3 = ( _polygonMap[pixelIndex3] == polygonIndex );
+
 				for( int x=marchingSquaresInf.x; x<marchingSquaresSup.x; x++ )
 				{
-					int contourIndex = leftMostCellIndex+x;
+					contourIndex = leftMostCellIndex+x;
 
-					int pixelIndex0 = (y+1)*bufferWidth + x;
-					int pixelIndex1 = (y+1)*bufferWidth + (x+1);
-					int pixelIndex2 = y*bufferWidth + (x+1);
-					int pixelIndex3 = y*bufferWidth + x;
+					pixelIndex1 = (y+1)*bufferWidth + (x+1);
+					pixelIndex2 = y*bufferWidth + (x+1);
+					thresholdValue1 = ( _polygonMap[pixelIndex1] == polygonIndex );
+					thresholdValue2 = ( _polygonMap[pixelIndex2] == polygonIndex );
 
-					bool thresholdValue0 = _thresholdMap[pixelIndex0];
-					bool thresholdValue1 = _thresholdMap[pixelIndex1];
-					bool thresholdValue2 = _thresholdMap[pixelIndex2];
-					bool thresholdValue3 = _thresholdMap[pixelIndex3];
-
-					ushort lookupIndex = 0;
+					byte lookupIndex = 0;
 					lookupIndex |= ( thresholdValue0 ? BitMask0 : Zero );
 					lookupIndex |= ( thresholdValue1 ? BitMask1 : Zero );
 					lookupIndex |= ( thresholdValue2 ? BitMask2 : Zero );
@@ -639,6 +462,11 @@ public partial class IrradianceTransfer : MonoBehaviour
 							leftMostXCoord = x;
 						}
 					}
+
+					pixelIndex0 = pixelIndex1;
+					pixelIndex3 = pixelIndex2;
+					thresholdValue0 = thresholdValue1;
+					thresholdValue3 = thresholdValue2;
 				}
 			}
 
@@ -648,10 +476,7 @@ public partial class IrradianceTransfer : MonoBehaviour
 				continue;
 			}
 
-			// allocate array for vertices
-			irradiancePolygon.Vertices = new Vector3[numContourCells];
-
-			// transform contour to world space
+			// transform outline to world space
 
 			const int Start = 0;
 			const int Left = 1;
@@ -660,57 +485,56 @@ public partial class IrradianceTransfer : MonoBehaviour
 			const int Down = 4;
 			const int Stop = -1;
 
-			int numVertices = 0;
 			int currentContourIndex = leftMostContourIndex;
 			int move = Start;
-
 			Vector3 viewPortSpaceVertexPos = Vector3.zero;
+			Vector3 w = Vector3.zero;
 
 			while( move != Stop )
 			{
 				viewPortSpaceVertexPos.x = currentContourIndex % (bufferWidth-1) + 0.5f;
 				viewPortSpaceVertexPos.y = currentContourIndex / (bufferWidth-1) + 0.5f;
 
-				ushort currentContourValue = _contourMap[currentContourIndex];
+				byte currentPolygonContourValue = _contourMap[currentContourIndex];
 
-				switch( currentContourValue )
+				switch( currentPolygonContourValue )
 				{
 				case 1:
 					viewPortSpaceVertexPos.x += OutlineOffset;
 					move = ( move == Right ) ? Down : Stop;
 					break;
 				case 2:
-					viewPortSpaceVertexPos.x += 1;
+					viewPortSpaceVertexPos.x += 0.5f;
 					viewPortSpaceVertexPos.y += OutlineOffset;
 					move = ( move == Up || move == Start ) ? Right : Stop;
 					break;
 				case 3:
-					viewPortSpaceVertexPos.x += 1;
+					viewPortSpaceVertexPos.x += 0.5f;
 					viewPortSpaceVertexPos.y += OutlineOffset;
 					move = ( move == Right ) ? Right : Stop;
 					break;
 				case 4:
-					viewPortSpaceVertexPos.x += 1 - OutlineOffset;
-					viewPortSpaceVertexPos.y += 1;
+					viewPortSpaceVertexPos.x += 0.5f - OutlineOffset;
+					viewPortSpaceVertexPos.y += 0.5f;
 					move = ( move == Left || move == Start ) ? Up : Stop;
 					break;
 				case 5:
-					viewPortSpaceVertexPos.x += ( move == Right ) ? OutlineOffset : ( 1 - OutlineOffset );
-					viewPortSpaceVertexPos.y += ( move == Right ) ? 1 : 0;
+					viewPortSpaceVertexPos.x += ( move == Right ) ? OutlineOffset : ( 0.5f - OutlineOffset );
+					viewPortSpaceVertexPos.y += ( move == Right ) ? 0.5f : 0;
 					move = ( move == Right ) ? Up : ( ( move == Left ) ? Down : Stop );
 					break;
 				case 6:
-					viewPortSpaceVertexPos.x += 1 - OutlineOffset;
-					viewPortSpaceVertexPos.y += 1;
+					viewPortSpaceVertexPos.x += 0.5f - OutlineOffset;
+					viewPortSpaceVertexPos.y += 0.5f;
 					move = ( move == Up || move == Start ) ? Up : Stop;
 					break;
 				case 7:
 					viewPortSpaceVertexPos.x += OutlineOffset;
-					viewPortSpaceVertexPos.y += 1;
+					viewPortSpaceVertexPos.y += 0.5f;
 					move = ( move == Right ) ? Up : Stop;
 					break;
 				case 8:
-					viewPortSpaceVertexPos.y += 1 - OutlineOffset;
+					viewPortSpaceVertexPos.y += 0.5f - OutlineOffset;
 					move = ( move == Down ) ? Left : Stop;
 					break;
 				case 9:
@@ -718,21 +542,21 @@ public partial class IrradianceTransfer : MonoBehaviour
 					move = ( move == Down ) ? Down : Stop;
 					break;
 				case 10:
-					viewPortSpaceVertexPos.x += ( move == Down ) ? 1 : 0;
-					viewPortSpaceVertexPos.y += ( move == Down ) ? ( 1 - OutlineOffset ) : OutlineOffset;
+					viewPortSpaceVertexPos.x += ( move == Down ) ? 0.5f : 0;
+					viewPortSpaceVertexPos.y += ( move == Down ) ? ( 0.5f - OutlineOffset ) : OutlineOffset;
 					move = ( move == Down ) ? Right : ( ( move == Up ) ? Left : Stop );
 					break;
 				case 11:
-					viewPortSpaceVertexPos.x += 1;
-					viewPortSpaceVertexPos.y += 1 - OutlineOffset;
+					viewPortSpaceVertexPos.x += 0.5f;
+					viewPortSpaceVertexPos.y += 0.5f - OutlineOffset;
 					move = ( move == Down ) ? Right : Stop;
 					break;
 				case 12:
-					viewPortSpaceVertexPos.y += 1 - OutlineOffset;
+					viewPortSpaceVertexPos.y += 0.5f - OutlineOffset;
 					move = ( move == Left ) ? Left : Stop;
 					break;
 				case 13:
-					viewPortSpaceVertexPos.x += 1 - OutlineOffset;
+					viewPortSpaceVertexPos.x += 0.5f - OutlineOffset;
 					move = ( move == Left ) ? Down : Stop;
 					break;
 				case 14:
@@ -772,18 +596,536 @@ public partial class IrradianceTransfer : MonoBehaviour
 				viewPortSpaceVertexPos.y *= _irradianceMapInvBufferResolution.y;
 
 				Ray ray = _offscreenCamera.ViewportPointToRay( viewPortSpaceVertexPos );
+				Vector3 rayOrigin = ray.origin;
+				Vector3 rayDirection = ray.direction;
+
+				// distance from point on near clip plane to polygon plane
 				float distance = float.MaxValue;
-				if( irradiancePolygon.polygonPlane.Raycast( ray, out distance ) )
+				w = rayOrigin - irradiancePolygon.pointOnPolygonPlane;
+				distance = -Vector3.Dot( irradiancePolygon.polygonPlaneNormal, w ) / Vector3.Dot( irradiancePolygon.polygonPlaneNormal, rayDirection );
+
+				_writeOnlyVertexBuffer.vertices[_numBatchVertices].flag = 1;
+				_writeOnlyVertexBuffer.vertices[_numBatchVertices].position = ( rayOrigin + rayDirection * distance );
+				_writeOnlyVertexBuffer.vertices[_numBatchVertices].localIndex = (uint)numPolygonVertices;
+				_writeOnlyVertexBuffer.vertices[_numBatchVertices].lastLocalIndex = 0;
+
+				_numBatchVertices++;
+				numPolygonVertices++;
+
+				if( _numBatchVertices >= _writeOnlyVertexBuffer.Length )
 				{
-					irradiancePolygon.Vertices[numVertices] = ray.origin + ray.direction * distance;
-					numVertices++;
+					_writeOnlyVertexBuffer.Resize( _writeOnlyVertexBuffer.Length + GPUGroupSize );
 				}
 			}
 
-			if( irradiancePolygon.Vertices.Length > numVertices )
+			irradiancePolygon.Vertices = new Vector3[numPolygonVertices];
+
+			// complete vertex data
+			for( int j=irradiancePolygon.BatchIndex; j<irradiancePolygon.BatchIndex+numPolygonVertices; j++ )
 			{
-				System.Array.Resize<Vector3>( ref irradiancePolygon.Vertices, numVertices );
+				_writeOnlyVertexBuffer.vertices[j].lastLocalIndex = (uint)( numPolygonVertices-1 );
+			}
+
+			numPolygonVertices = 0;
+		}
+
+		if( _readOnlyVertexBuffer.Length != _writeOnlyVertexBuffer.Length )
+		{
+			_readOnlyVertexBuffer.Resize( _writeOnlyVertexBuffer.Length );
+		}
+
+		PALUtils.Swap<VertexBuffer>( ref _readOnlyVertexBuffer, ref _writeOnlyVertexBuffer );
+
+		ProcessPolygonsCPU();
+	}
+
+	#if SHOW_POLYGON_PROCESSING_PASSES
+	int _polygonProcessingPass = 0;
+	#endif
+
+	#if SHOW_VERTEX_LABELS
+	List<KeyValuePair<Vector3,string>> _vertexLabels = new List<KeyValuePair<Vector3,string>>();
+	#endif
+
+	void DrawVertexLabels()
+	{
+		#if SHOW_VERTEX_LABELS		
+			foreach( var vertexLabel in _vertexLabels )
+			{
+				UnityEditor.Handles.Label( vertexLabel.Key, vertexLabel.Value );
+			}
+		#endif
+	}
+
+	void ProcessPolygonsCPU()
+	{
+		#if SHOW_POLYGON_PROCESSING_PASSES
+		if( _polygonProcessingPass == 0 )
+		{
+			PALUtils.Swap<VertexBuffer>( ref _readOnlyVertexBuffer, ref _writeOnlyVertexBuffer );
+		}
+		#endif
+
+		// smooth projected vertices
+
+		#if SHOW_POLYGON_PROCESSING_PASSES
+		if( _polygonProcessingPass >= 1 )
+		#endif
+		{
+			int totalSmoothSteps = GPUSmoothSteps + (int)(Resolution);
+			for( int smoothStep=0; smoothStep<totalSmoothSteps; smoothStep++ )
+			{
+				if( smoothStep > 0 )
+				{
+					PALUtils.Swap<VertexBuffer>( ref _readOnlyVertexBuffer, ref _writeOnlyVertexBuffer );
+				}
+				SmoothVerticesCPU( ref _readOnlyVertexBuffer.vertices, ref _writeOnlyVertexBuffer.vertices, _numBatchVertices );
+			}
+		}
+
+		// reduce semi-parallel edges, pass 0
+
+		#if SHOW_POLYGON_PROCESSING_PASSES
+		if( _polygonProcessingPass >= 2  )
+		#endif
+		{
+			PALUtils.Swap<VertexBuffer>( ref _readOnlyVertexBuffer, ref _writeOnlyVertexBuffer );
+			ReduceSemiParallelEdges( ref _readOnlyVertexBuffer.vertices, ref _writeOnlyVertexBuffer.vertices, _numBatchVertices, Mathf.Cos( Mathf.Deg2Rad * GPUSemiParallelEdgeAngle0 ) );
+		}
+
+		// merge even vertices
+
+		#if SHOW_POLYGON_PROCESSING_PASSES
+		if( _polygonProcessingPass >= 3  )
+		#endif
+		{
+			PALUtils.Swap<VertexBuffer>( ref _readOnlyVertexBuffer, ref _writeOnlyVertexBuffer );
+			MergeEvenVertices( ref _readOnlyVertexBuffer.vertices, ref _writeOnlyVertexBuffer.vertices, _numBatchVertices, GPUMergeEvenVerticesThreshold );
+		}
+
+		// reduce semi-parallel edges, pass 1
+
+		#if SHOW_POLYGON_PROCESSING_PASSES
+		if( _polygonProcessingPass >= 4  )
+		#endif
+		{
+			PALUtils.Swap<VertexBuffer>( ref _readOnlyVertexBuffer, ref _writeOnlyVertexBuffer );
+			ReduceSemiParallelEdges( ref _readOnlyVertexBuffer.vertices, ref _writeOnlyVertexBuffer.vertices, _numBatchVertices, Mathf.Cos( Mathf.Deg2Rad * GPUSemiParallelEdgeAngle1 ) );
+		}
+
+		// merge sparse vertices
+
+		#if SHOW_POLYGON_PROCESSING_PASSES
+		if( _polygonProcessingPass >= 5 )
+		#endif
+		{
+			PALUtils.Swap<VertexBuffer>( ref _readOnlyVertexBuffer, ref _writeOnlyVertexBuffer );
+			MergeSparseVertices( ref _readOnlyVertexBuffer.vertices, ref _writeOnlyVertexBuffer.vertices, _numBatchVertices, GPUMergeSparseVerticesThreshold, 2 );
+		}
+
+		// reduce semi-parallel edges, pass 2
+
+		#if SHOW_POLYGON_PROCESSING_PASSES
+		if( _polygonProcessingPass >= 6  )
+		#endif
+		{
+			PALUtils.Swap<VertexBuffer>( ref _readOnlyVertexBuffer, ref _writeOnlyVertexBuffer );
+			ReduceSemiParallelEdges( ref _readOnlyVertexBuffer.vertices, ref _writeOnlyVertexBuffer.vertices, _numBatchVertices, Mathf.Cos( Mathf.Deg2Rad * GPUSemiParallelEdgeAngle2 ) );
+		}
+
+		// remove lesser edges, pass 0
+
+		#if SHOW_POLYGON_PROCESSING_PASSES
+		if( _polygonProcessingPass >= 7  )
+		#endif
+		{			
+			PALUtils.Swap<VertexBuffer>( ref _readOnlyVertexBuffer, ref _writeOnlyVertexBuffer );
+			RemoveLesserEdges( ref _readOnlyVertexBuffer.vertices, ref _writeOnlyVertexBuffer.vertices, _numBatchVertices, Mathf.Cos( Mathf.Deg2Rad * GPUEdgeAngle0 ), GPUEdgeRatio0 );
+		}
+
+		// remove lesser edges, pass 1
+
+		#if SHOW_POLYGON_PROCESSING_PASSES
+		if( _polygonProcessingPass >= 8  )
+		#endif
+		{
+			PALUtils.Swap<VertexBuffer>( ref _readOnlyVertexBuffer, ref _writeOnlyVertexBuffer );
+			RemoveLesserEdges( ref _readOnlyVertexBuffer.vertices, ref _writeOnlyVertexBuffer.vertices, _numBatchVertices, Mathf.Cos( Mathf.Deg2Rad * GPUEdgeAngle1 ), GPUEdgeRatio1 );
+		}
+
+		// remove lesser edges, pass 2
+
+		#if SHOW_POLYGON_PROCESSING_PASSES
+		if( _polygonProcessingPass >= 9  )
+		#endif
+		{			
+			PALUtils.Swap<VertexBuffer>( ref _readOnlyVertexBuffer, ref _writeOnlyVertexBuffer );
+			RemoveLesserEdges( ref _readOnlyVertexBuffer.vertices, ref _writeOnlyVertexBuffer.vertices, _numBatchVertices, Mathf.Cos( Mathf.Deg2Rad * GPUEdgeAngle2 ), GPUEdgeRatio2 );
+		}
+
+		#if SHOW_POLYGON_PROCESSING_PASSES
+			_polygonProcessingPass++;
+			if( _polygonProcessingPass >= 10 ) _polygonProcessingPass = 0;
+		#endif
+
+		// get data 
+
+		PALUtils.Swap<VertexBuffer>( ref _readOnlyVertexBuffer, ref _writeOnlyVertexBuffer );
+
+		#if SHOW_VERTEX_LABELS
+			_vertexLabels.Clear();
+		#endif
+
+		for( int i=0; i<_irradiancePolygons.Length; i++ )
+		{
+			IrradiancePolygon irradiancePolygon = _irradiancePolygons[i];
+			if( irradiancePolygon == null ) continue;
+
+			int numPolygonVertices = irradiancePolygon.Vertices.Length;
+			int numReducedVertices = 0;
+			int startVertex = irradiancePolygon.BatchIndex;
+
+			for( int j=0; j<numPolygonVertices; j++ )
+			{
+				if( _readOnlyVertexBuffer.vertices[startVertex+j].flag == 1 )
+				{
+					irradiancePolygon.Vertices[numReducedVertices] = _readOnlyVertexBuffer.vertices[startVertex+j].position;
+					numReducedVertices++;
+
+					#if SHOW_VERTEX_LABELS
+					_vertexLabels.Add( new KeyValuePair<Vector3,string>( _readOnlyVertexBuffer.vertices[startVertex+j].position, _readOnlyVertexBuffer.vertices[startVertex+j].localIndex.ToString() ) );
+					#endif
+				}
+			}
+
+			if( numReducedVertices < numPolygonVertices )
+			{
+				System.Array.Resize<Vector3>( ref irradiancePolygon.Vertices, numReducedVertices );
 			}
 		}
 	}
+
+	static uint GetPrevIndex(uint index, ref Vertex[] inBuffer)
+	{
+		if( inBuffer[index].localIndex == 0 )
+		{
+			return index + inBuffer[index].lastLocalIndex;
+		}
+		else
+		{
+			return index-1;
+		}
+	}
+
+	static uint GetNextIndex(uint index, ref Vertex[] inBuffer)
+	{
+		if( inBuffer[index].localIndex == inBuffer[index].lastLocalIndex )
+		{
+			return index - inBuffer[index].lastLocalIndex;
+		}
+		else
+		{
+			return index+1;
+		}
+	}
+
+	static uint GetPrevSparseIndex(uint index, uint sparseness, ref Vertex[] inBuffer)
+	{
+		for( uint i=0; i<sparseness; i++ )
+		{
+			if( inBuffer[index].localIndex == 0 )
+			{
+				index = index + inBuffer[index].lastLocalIndex;
+			}
+			else
+			{
+				index = index-1;
+			}
+		}
+		return index;
+	}
+
+	static uint GetNextSparseIndex(uint index, uint sparseness, ref Vertex[] inBuffer)
+	{
+		for( uint i=0; i<sparseness; i++ )
+		{
+			if( inBuffer[index].localIndex == inBuffer[index].lastLocalIndex )
+			{
+				index = index - inBuffer[index].lastLocalIndex;
+			}
+			else
+			{
+				index = index+1;
+			}
+		}
+		return index;
+	}
+
+	static uint GetPrevIndexWithFlag(uint index, uint flag, ref Vertex[] inBuffer)
+	{
+		uint prevIndex = GetPrevIndex( index, ref inBuffer );
+		while( prevIndex != index && inBuffer[prevIndex].flag != flag )
+		{
+			prevIndex = GetPrevIndex( prevIndex, ref inBuffer );
+		}
+		return prevIndex;		
+	}
+
+	static uint GetNextIndexWithFlag(uint index, uint flag, ref Vertex[] inBuffer)
+	{
+		uint nextIndex = GetNextIndex( index, ref inBuffer );
+		while( nextIndex != index && inBuffer[nextIndex].flag != flag )
+		{
+			nextIndex = GetNextIndex( nextIndex, ref inBuffer );
+		}
+		return nextIndex;	
+	}
+
+	static void SmoothVerticesCPU(ref Vertex[] inBuffer, ref Vertex[] outBuffer, int numBatchVertices)
+	{
+		for( uint index=0; index<numBatchVertices; index++ )
+		{
+			uint prevIndex = ( inBuffer[index].localIndex == 0 ) ? ( index + inBuffer[index].lastLocalIndex ) : ( index-1 );
+			uint nextIndex = ( inBuffer[index].localIndex == inBuffer[index].lastLocalIndex ) ? ( index - inBuffer[index].lastLocalIndex ) : ( index+1 );
+
+			#if GAUSSIAN_SMOOTH
+				uint precedingIndex = ( inBuffer[prevIndex].localIndex == 0 ) ? ( prevIndex + inBuffer[prevIndex].lastLocalIndex ) : ( prevIndex-1 );
+				uint succedingIndex = ( inBuffer[nextIndex].localIndex == inBuffer[nextIndex].lastLocalIndex ) ? ( nextIndex - inBuffer[nextIndex].lastLocalIndex ) : ( nextIndex+1 );
+
+				outBuffer[index].position = 
+				(
+					inBuffer[precedingIndex].position * 0.0702702703f +
+					inBuffer[prevIndex].position * 0.3162162162f +
+					inBuffer[index].position * 0.2270270270f +
+					inBuffer[nextIndex].position * 0.3162162162f +
+					inBuffer[succedingIndex].position * 0.0702702703f
+				);
+			#else				
+				outBuffer[index].position = ( inBuffer[prevIndex].position + inBuffer[index].position + inBuffer[nextIndex].position ) / 3.0f;
+			#endif
+
+			outBuffer[index].flag = inBuffer[index].flag;
+			outBuffer[index].localIndex = inBuffer[index].localIndex;
+			outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
+		}
+	}
+
+	static void ReduceSemiParallelEdges(ref Vertex[] inBuffer, ref Vertex[] outBuffer, int numBatchVertices, float thresholdAngleCosine)
+	{
+		for( uint index=0; index<numBatchVertices; index++ )
+		{
+			if( inBuffer[index].flag == 1 )
+			{
+				uint prevIndex = GetPrevIndexWithFlag( index, 1, ref inBuffer );
+				uint nextIndex = GetNextIndexWithFlag( index, 1, ref inBuffer );
+
+				Vector3 prevPosition = inBuffer[prevIndex].position;
+				Vector3 currPosition = inBuffer[index].position;
+				Vector3 nextPosition = inBuffer[nextIndex].position;
+
+				Vector3 prevEdge = ( currPosition - prevPosition ).normalized;
+				Vector3 currEdge = ( nextPosition - currPosition ).normalized;
+
+				float edgeAngleCosine = Vector3.Dot( prevEdge, currEdge );
+
+				if( edgeAngleCosine > thresholdAngleCosine )
+				{
+					outBuffer[index].flag = 0;
+				}
+				else
+				{
+					outBuffer[index].flag = inBuffer[index].flag;
+				}
+				outBuffer[index].localIndex = inBuffer[index].localIndex;
+				outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
+				outBuffer[index].position = inBuffer[index].position;
+			}
+			else
+			{
+				outBuffer[index].flag = inBuffer[index].flag;
+				outBuffer[index].localIndex = inBuffer[index].localIndex;
+				outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
+				outBuffer[index].position = inBuffer[index].position;
+			}
+		}
+	}
+
+	static void MergeEvenVertices(ref Vertex[] inBuffer, ref Vertex[] outBuffer, int numBatchVertices, uint thresholdLastLocalIndex)
+	{
+		for( uint index=0; index<numBatchVertices; index++ )
+		{
+			if( inBuffer[index].flag == 1 && inBuffer[index].lastLocalIndex + 1 > thresholdLastLocalIndex )
+			{
+				if( inBuffer[index].localIndex % 2 == 0 )
+				{
+					uint prevIndex = GetPrevIndex( index, ref inBuffer );
+					uint nextIndex = GetNextIndex( index, ref inBuffer );
+
+					if( inBuffer[prevIndex].flag == 1 && inBuffer[nextIndex].flag == 1 )
+					{
+						outBuffer[index].position = ( inBuffer[prevIndex].position + inBuffer[index].position + inBuffer[nextIndex].position ) / 3;
+					}
+					else if( inBuffer[prevIndex].flag == 1 )
+					{
+						outBuffer[index].position = ( inBuffer[prevIndex].position + inBuffer[index].position ) / 2;
+					}
+					else if( inBuffer[nextIndex].flag == 1 )
+					{
+						outBuffer[index].position = ( inBuffer[nextIndex].position + inBuffer[index].position ) / 2;
+					}
+
+					outBuffer[index].flag = inBuffer[index].flag;
+					outBuffer[index].localIndex = inBuffer[index].localIndex;
+					outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
+				}
+				else
+				{
+					outBuffer[index].flag = 0;
+					outBuffer[index].localIndex = inBuffer[index].localIndex;
+					outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
+					outBuffer[index].position = inBuffer[index].position;
+				}
+			}
+			else
+			{
+				outBuffer[index].flag = inBuffer[index].flag;
+				outBuffer[index].localIndex = inBuffer[index].localIndex;
+				outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
+				outBuffer[index].position = inBuffer[index].position;
+			}
+		}
+	}
+
+	static void MergeSparseVertices(ref Vertex[] inBuffer, ref Vertex[] outBuffer, int numBatchVertices, uint thresholdLastLocalIndex, uint sparseness)
+	{
+		for( uint index=0; index<numBatchVertices; index++ )
+		{
+			if( inBuffer[index].flag == 1 && inBuffer[index].lastLocalIndex + 1 > thresholdLastLocalIndex )
+			{
+				uint sparseIndex = inBuffer[index].localIndex / sparseness;
+				if( sparseIndex % 2 == 0 )
+				{
+					uint prevIndex = GetPrevSparseIndex( index, sparseness, ref inBuffer );
+					uint nextIndex = GetNextSparseIndex( index, sparseness, ref inBuffer );
+
+					if( inBuffer[prevIndex].flag == 1 && inBuffer[nextIndex].flag == 1 )
+					{
+						outBuffer[index].position = ( inBuffer[prevIndex].position + inBuffer[index].position + inBuffer[nextIndex].position ) / 3;
+					}
+					else if( inBuffer[prevIndex].flag == 1 )
+					{
+						outBuffer[index].position = ( inBuffer[prevIndex].position + inBuffer[index].position ) / 2;
+					}
+					else if( inBuffer[nextIndex].flag == 1 )
+					{
+						outBuffer[index].position = ( inBuffer[nextIndex].position + inBuffer[index].position ) / 2;
+					}
+
+					outBuffer[index].flag = inBuffer[index].flag;
+					outBuffer[index].localIndex = inBuffer[index].localIndex;
+					outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
+				}
+				else
+				{
+					outBuffer[index].flag = 0;
+					outBuffer[index].localIndex = inBuffer[index].localIndex;
+					outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
+					outBuffer[index].position = inBuffer[index].position;
+				}
+			}
+			else
+			{
+				outBuffer[index].flag = inBuffer[index].flag;
+				outBuffer[index].localIndex = inBuffer[index].localIndex;
+				outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
+				outBuffer[index].position = inBuffer[index].position;
+			}
+		}
+	}
+
+	static void RemoveLesserEdges(ref Vertex[] inBuffer, ref Vertex[] outBuffer, int numBatchVertices, float thresholdAngleCosine, float thresholdEdgeRatio)
+	{
+		for( uint index=0; index<numBatchVertices; index++ )
+		{
+			if( inBuffer[index].flag == 1 )
+			{
+				uint prevIndex = GetPrevIndexWithFlag( index, 1, ref inBuffer );
+				uint nextIndex = GetNextIndexWithFlag( index, 1, ref inBuffer );
+				uint precedingIndex = GetPrevIndexWithFlag( prevIndex, 1, ref inBuffer );
+				uint succedingIndex = GetNextIndexWithFlag( nextIndex, 1, ref inBuffer );
+
+				Vector3 prevPosition = inBuffer[prevIndex].position;
+				Vector3 currPosition = inBuffer[index].position;
+				Vector3 nextPosition = inBuffer[nextIndex].position;
+				Vector3 precedingPosition = inBuffer[precedingIndex].position;
+				Vector3 succedingPosition = inBuffer[succedingIndex].position;
+
+				Vector3 prevEdge = ( currPosition - prevPosition );
+				Vector3 currEdge = ( nextPosition - currPosition );
+				Vector3 nextEdge = ( succedingPosition - nextPosition );
+
+				float prevEdgeLength = ( prevEdge ).magnitude;
+				float currEdgeLength = ( currEdge ).magnitude;
+				float nextEdgeLength = ( nextEdge ).magnitude;
+
+				if( prevEdgeLength * thresholdEdgeRatio >= currEdgeLength || nextEdgeLength * thresholdEdgeRatio >= currEdgeLength )
+				{
+					prevEdge *= 1.0f / prevEdgeLength;
+					nextEdge *= 1.0f / nextEdgeLength;
+
+					float edgeAngleCosine = Vector3.Dot( prevEdge, nextEdge );
+
+					if( edgeAngleCosine > thresholdAngleCosine )
+					{
+						outBuffer[index].position = ( currPosition + nextPosition ) / 2;
+					}
+					else
+					{				
+						outBuffer[index].position = inBuffer[index].position;
+					}
+					outBuffer[index].flag = inBuffer[index].flag;
+					outBuffer[index].localIndex = inBuffer[index].localIndex;
+					outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
+				}
+				else
+				{
+					prevEdge = ( prevPosition - precedingPosition );
+					currEdge = ( currPosition - prevPosition );
+					nextEdge = ( nextPosition - currPosition );
+
+					prevEdgeLength = ( prevEdge ).magnitude;
+					currEdgeLength = ( currEdge ).magnitude;
+					nextEdgeLength = ( nextEdge ).magnitude;
+
+					if( prevEdgeLength * thresholdEdgeRatio >= currEdgeLength || nextEdgeLength * thresholdEdgeRatio >=  currEdgeLength )
+					{
+						prevEdge *= 1.0f / prevEdgeLength;
+						nextEdge *= 1.0f / nextEdgeLength;
+
+						float edgeAngleCosine = Vector3.Dot( prevEdge, nextEdge );
+
+						if( edgeAngleCosine > thresholdAngleCosine )
+						{
+							outBuffer[index].flag = 0;
+						}
+						else
+						{
+							outBuffer[index].flag = inBuffer[index].flag;
+						}
+						outBuffer[index].localIndex = inBuffer[index].localIndex;
+						outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
+						outBuffer[index].position = inBuffer[index].position;
+					}
+				}
+			}
+			else
+			{
+				outBuffer[index].flag = inBuffer[index].flag;
+				outBuffer[index].localIndex = inBuffer[index].localIndex;
+				outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
+				outBuffer[index].position = inBuffer[index].position;
+			}
+		}
+	}
+	#endregion
 }

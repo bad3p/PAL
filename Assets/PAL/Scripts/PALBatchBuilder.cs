@@ -36,6 +36,69 @@ public class PolygonalAreaLight
 	public ProjectionMode ProjectionMode = ProjectionMode.Centered;
 	public Vector3[] Vertices = new Vector3[0];
 	public int BatchIndex = 0;
+
+	public float GetIlluminationIntensity(Vector3 position, Vector3 normal, ProjectionMode projectionMode)
+	{
+		float planeDistance = -Vector3.Dot( normal, position );
+
+		Vector3 pointOnPolygon;
+		if( projectionMode == ProjectionMode.Weighted )
+		{
+			pointOnPolygon = Vector3.zero;
+			float weightSum = 0;
+			for( int j=0; j<Vertices.Length; j++ )
+			{
+				float weight = 1.0f / Vector3.Distance( Vertices[j], position );
+				weightSum += weight;
+				pointOnPolygon += Vertices[j] * weight;
+			}
+			pointOnPolygon *= 1.0f / weightSum;
+		}
+		else
+		{
+			pointOnPolygon = Centroid;
+		}
+
+		Vector3 projectionBasisZ = ( pointOnPolygon - position ).normalized;
+		float sideCondition = Vector3.Dot( projectionBasisZ, Normal );
+		if( sideCondition < 0 )
+		{
+			Vector3 projectionBasisY = new Vector3( projectionBasisZ.y, projectionBasisZ.z, -projectionBasisZ.x );
+			Vector3 projectionBasisX = Vector3.Cross( projectionBasisY, projectionBasisZ ).normalized;
+			projectionBasisY = Vector3.Cross( projectionBasisZ, projectionBasisX ).normalized;
+
+			Vector3 biasOffset = projectionBasisZ * Circumcircle.w * Bias;
+			Vector3 biasedWorldPos = position - biasOffset;
+
+			float polygonArea = 0;
+
+			Vector3 v0 = Vertices[0] - biasedWorldPos;
+			v0.Set( Vector3.Dot( v0, projectionBasisX ), Vector3.Dot( v0, projectionBasisY ), Vector3.Dot( v0, projectionBasisZ ) );
+			v0.x /= v0.z;
+			v0.y /= v0.z;
+
+			for( int j=1; j<Vertices.Length; j++ )
+			{
+				Vector3 v1 = Vertices[j] - biasedWorldPos; 
+				v1.Set( Vector3.Dot( v1, projectionBasisX ), Vector3.Dot( v1, projectionBasisY ), Vector3.Dot( v1, projectionBasisZ ) );
+				v1.x /= v1.z;
+				v1.y /= v1.z;
+
+				polygonArea += v0.x*v1.y - v1.x*v0.y; 
+
+				v0 = v1; 
+			}
+
+			float distanceToFragmentPlane = Vector3.Dot( Circumcircle, Normal ) + planeDistance;
+			float localOcclusion = Mathf.Clamp01( ( distanceToFragmentPlane+Circumcircle.w )/( 2 * Circumcircle.w ) );
+
+			return -0.5f * polygonArea * Intensity * localOcclusion;
+		}
+		else
+		{
+			return 0;
+		}
+	}
 };
 
 static public class PALBatchBuilder
@@ -115,6 +178,11 @@ static public class PALBatchBuilder
 		else
 		{
 			_numAreaLightsUpdated++;
+		}
+
+		if( _polygonalAreaLights == null )
+		{
+			return;
 		}
 
 		if( _numAreaLightsUpdated < _polygonalAreaLights.Count )

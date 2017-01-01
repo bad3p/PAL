@@ -51,7 +51,7 @@ Shader "PAL/Opaque"
 			#pragma vertex vert
 			#pragma fragment frag
 			#pragma fragmentoption ARB_precision_hint_fastest
-			#pragma exclude_renderers d3d11_9x 
+			#pragma exclude_renderers d3d11_9x
 
 			#pragma multi_compile _ _PAL_BUMPY
 			#pragma multi_compile _ _PAL_PROJECTION_WEIGHTED
