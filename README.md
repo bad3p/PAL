@@ -1,8 +1,8 @@
 # REAL-TIME IRRADIANCE TRANSFER
 
-![Example](https://github.com/bad3p/PAL/blob/master/Docs/Images/IrradianceTransfer.jpg?raw=true)
+![Example](https://github.com/bad3p/PAL/blob/master/Docs/Images/IrradiancePolygons.jpg?raw=true)
 
-First workable variant of irradiance transfer using polygonal area lights.
+Work still in progress. I have implemented marching squares and polygon processing in ComputeShader.
 
 # POLYGONAL AREA LIGHTS.
 
