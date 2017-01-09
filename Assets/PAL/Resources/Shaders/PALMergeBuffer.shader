@@ -87,7 +87,7 @@ Shader "PAL/MergeBuffer"
 
 			float4 frag (v2f i) : SV_Target  
 			{
-				float4 result = 0;
+				float4 result = float4( 0,0,0,1 );
 
 				float3 fragmentWorldNormal = normalize( tex2D( _NormalBuffer, i.uv ).xyz );
 				float4 geometryBufferSample = tex2D( _GeometryBuffer, i.uv );

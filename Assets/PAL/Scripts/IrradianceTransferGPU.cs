@@ -131,22 +131,6 @@ public partial class IrradianceTransfer : MonoBehaviour
 			uint polygonContourMask = ContourMask[i];
 			int polygonContourShift = i*4;
 
-			// calculate plane of polygon in world space
-
-			if( irradiancePolygon.numPlanePixels == 3 )
-			{
-				worldSpacePlaneNormal = Vector3.Cross( (irradiancePolygon.worldSpacePixelPos[1]-irradiancePolygon.worldSpacePixelPos[0]).normalized, (irradiancePolygon.worldSpacePixelPos[2]-irradiancePolygon.worldSpacePixelPos[0]).normalized ).normalized;
-				worldSpacePlaneNormal *= -Mathf.Sign( Vector3.Dot( ( irradiancePolygon.worldSpacePixelPos[0] - _offscreenCamera.transform.position ).normalized, worldSpacePlaneNormal ) );
-				irradiancePolygon.polygonPlaneNormal = worldSpacePlaneNormal;
-				irradiancePolygon.pointOnPolygonPlane = irradiancePolygon.worldSpacePixelPos[0];
-			}
-			else
-			{
-				// edge case : all the pixels lay on the same line
-				_irradiancePolygons[polygonIndices[i]] = null;
-				continue;
-			}
-
 			// locate leftmost cell containing outline element of the polygon
 
 			int leftMostContourIndex = -1;

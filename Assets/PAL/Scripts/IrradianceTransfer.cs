@@ -21,6 +21,9 @@
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
+#define FORCE_CPU_MODE
+//#undef FORCE_CPU_MODE
+
 using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
@@ -104,7 +107,8 @@ public partial class IrradianceTransfer : MonoBehaviour
 
 	#region Constants
 	// algorithm constants
-	const float IlluminationBufferIntensityScale = 0.125f;
+	const float MaxPolygonPlaneNormalAngle = 80.0f;
+	const float IlluminationBufferIntensityScale = 0.01f;//0.125f;
 	const float OutlineOffset = 0.125f;
 
 	// RGBA-to-float decoding constants (from UnityCG.cginc) for Color32 values
@@ -193,6 +197,8 @@ public partial class IrradianceTransfer : MonoBehaviour
 		public int           totalGreen = 0;
 		public int           totalBlue = 0;
 		public Vector3       polygonPlaneNormal = Vector3.zero;
+		public Vector3       polygonPlaneTangent = Vector3.zero;
+		public Vector3       polygonPlaneBitangent = Vector3.zero;
 		public Vector3       pointOnPolygonPlane = Vector3.zero;
 		public int           numPlanePixels = 0;
 		public PixelCoords[] planePixels = new PixelCoords[] { PixelCoords.zero, PixelCoords.zero, PixelCoords.zero };
@@ -265,8 +271,6 @@ public partial class IrradianceTransfer : MonoBehaviour
 	private ComputeBuffer    _outVertexBuffer = null;
 	private ComputeBuffer    _polygonPlaneBuffer = null;
 	private VertexBuffer     _readWriteVertexBuffer = new VertexBuffer();
-	private VertexBuffer     _readOnlyVertexBuffer = new VertexBuffer();
-	private VertexBuffer     _writeOnlyVertexBuffer = new VertexBuffer();
 	private PolygonPlane[]   _polygonPlanes = new PolygonPlane[0];
 	private ComputeShader    _computeShader = null;
 	int                      _numBatchVertices = 0;
@@ -379,14 +383,14 @@ public partial class IrradianceTransfer : MonoBehaviour
 		_polygonSize = new int[bufferWidth*bufferHeight];
 		_contourMap = new byte[(bufferWidth-1)*(bufferHeight-1)];
 
+		#if !FORCE_CPU_MODE
 		if( SystemInfo.supportsComputeShaders )
+		#endif
 		{
 			_polygonMapBuffer = new ComputeBuffer( bufferWidth * bufferHeight, sizeof(int) );
 			_contourBuffer = new ComputeBuffer( (bufferWidth-1) * (bufferHeight-1), sizeof(uint) );
 			_packedContourMap = new uint[(bufferWidth-1)*(bufferHeight-1)];
 			_readWriteVertexBuffer = new VertexBuffer( GPUGroupSize );
-			_readOnlyVertexBuffer = new VertexBuffer( GPUGroupSize );
-			_writeOnlyVertexBuffer = new VertexBuffer( GPUGroupSize );
 			_polygonPlanes = new PolygonPlane[32];
 			_computeShader = Resources.Load<ComputeShader>( "Shaders/PAL" );
 		}
@@ -446,14 +450,18 @@ public partial class IrradianceTransfer : MonoBehaviour
 
 		CreateSecondaryAreaLights( ref marchingSquaresInf, ref marchingSquaresSup );
 
-		if( SystemInfo.supportsComputeShaders )
-		{
-			MarchingSquaresGPU( marchingSquaresInf, marchingSquaresSup );
-		}
-		else
-		{
+		#if FORCE_CPU_MODE
 			MarchingSquaresCPU( marchingSquaresInf, marchingSquaresSup );
-		}
+		#else
+			if( SystemInfo.supportsComputeShaders )
+			{
+				MarchingSquaresGPU( marchingSquaresInf, marchingSquaresSup );
+			}
+			else
+			{
+				MarchingSquaresCPU( marchingSquaresInf, marchingSquaresSup );
+			}
+		#endif
 
 		Color averageAlbedo = Color.black;
 		for( int polygonIndex=0; polygonIndex<_irradiancePolygons.Length; polygonIndex++ )

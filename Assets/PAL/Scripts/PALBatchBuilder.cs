@@ -214,7 +214,14 @@ static public class PALBatchBuilder
 		for( int k=0; k<_polygonalAreaLights.Count; k++ )
 		{
 			PolygonalAreaLight polygonalAreaLight = _polygonalAreaLights[k];
-			if( polygonalAreaLight.Vertices.Length < 3 ) continue;
+			if( polygonalAreaLight.Vertices.Length < 3 ) 
+			{
+				continue;
+			}
+			if( vertexBufferOffset+polygonalAreaLight.Vertices.Length >= _propertyValue.Length )
+			{
+				continue;
+			}
 			polygonalAreaLight.BatchIndex = batchIndex;
 
 			for( int j=0; j<polygonalAreaLight.Vertices.Length; j++ )

@@ -98,6 +98,8 @@ float4 PALDiffuseContribution(float3 worldPos, float3 worldNormal)
 			v0 = float3( dot( v0, projectionBasisX ), dot( v0, projectionBasisY ), dot( v0, projectionBasisZ ) );
 			v0.xy /= v0.z;
 
+			float3 vLoop = v0;
+
 			for( int j=firstVertexIndex+1; j<lastVertexIndex; j++ )
 			{
 				float3 v1 = _PALBuffer[j].xyz - biasedWorldPos; 
@@ -108,6 +110,9 @@ float4 PALDiffuseContribution(float3 worldPos, float3 worldNormal)
 
 				v0 = v1; 
 			}
+
+			float3 v1 = vLoop;
+			polygonArea += v0.x*v1.y - v1.x*v0.y;
 
 			diffuseColor += -0.5 * polygonArea * intensity * PALLocalOcclusion( polygonCircumcircle, fragmentPlane ) * polygonColor;
 		}
