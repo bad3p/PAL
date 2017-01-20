@@ -57,6 +57,10 @@ public partial class IrradianceTransfer : MonoBehaviour
 
 		int numPolygonIndices = 0;
 		int[] polygonIndices = new int[8];
+
+		int numAsyncPolygonIndices = 0;
+		int[] asyncPolygonIndices = new int[8];
+
 		Vector4 polygonIndices0123 = Vector4.zero;
 		Vector4 polygonIndices4567 = Vector4.zero;
 
@@ -103,10 +107,23 @@ public partial class IrradianceTransfer : MonoBehaviour
 				var numberOfGroups = Mathf.CeilToInt( (float) (bufferWidth-1)*(bufferHeight-1)/GPUGroupSize );
 				_computeShader.Dispatch( marchingSquaresKernel, numberOfGroups, 1, 1 );
 
+				if( numAsyncPolygonIndices > 0 )
+				{
+					BuildPolygonOutlines( numAsyncPolygonIndices, ref asyncPolygonIndices, marchingSquaresInf, marchingSquaresSup );
+				}
+
 				_contourBuffer.GetData( _packedContourMap );
-				BuildPolygonOutlines( numPolygonIndices, ref polygonIndices, marchingSquaresInf, marchingSquaresSup );
+
+				numAsyncPolygonIndices = numPolygonIndices;
+				System.Array.Copy( polygonIndices, asyncPolygonIndices, polygonIndices.Length );
+
 				numPolygonIndices = 0;
 			}
+		}
+
+		if( numAsyncPolygonIndices > 0 )
+		{
+			BuildPolygonOutlines( numAsyncPolygonIndices, ref asyncPolygonIndices, marchingSquaresInf, marchingSquaresSup );
 		}
 
 		ProcessPolygonsGPU();

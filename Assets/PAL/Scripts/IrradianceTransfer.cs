@@ -423,7 +423,7 @@ public partial class IrradianceTransfer : MonoBehaviour
 		transformChanged = transformChanged || ( _offscreenCamera.fieldOfView != OffscreenCameraFOV );
 		bool intensityChanged = Mathf.Abs( _meshAreaLight.Intensity - _prevIntensity ) > Mathf.Epsilon;
 
-#if true
+#if false
 		transformChanged = true;
 		intensityChanged = true;
 #endif
