@@ -238,7 +238,6 @@ public partial class IrradianceTransfer : MonoBehaviour
 		int bufferWidth = _depthBuffer.width;
 
 		float farClipPlane = _offscreenCamera.farClipPlane;
-		Vector3 offscreenCameraDir = _offscreenCamera.transform.forward;
 
 		Color32 depthPixel32;
 		Color32 irradiancePixel32;

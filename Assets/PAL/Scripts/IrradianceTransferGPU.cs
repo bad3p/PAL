@@ -118,7 +118,6 @@ public partial class IrradianceTransfer : MonoBehaviour
 		int bufferWidth = _depthBuffer.width;
 
 		int numPolygonVertices = 0;
-		Vector3 worldSpacePlaneNormal = Vector3.zero;
 
 		for( int i=0; i<numPolygonIndices; i++ )
 		{
@@ -158,7 +157,7 @@ public partial class IrradianceTransfer : MonoBehaviour
 					break;
 				}
 			}
-				
+
 			if( leftMostContourIndex < 0 )
 			{
 				continue;
@@ -176,6 +175,8 @@ public partial class IrradianceTransfer : MonoBehaviour
 			int currentContourIndex = leftMostContourIndex;
 			int move = Start;
 			Vector3 viewPortSpaceVertexPos = Vector3.zero;
+
+			uint[] prevPolygonContourValue = new uint[2] { 0, 0 };
 
 			while( move != Stop )
 			{
@@ -280,147 +281,110 @@ public partial class IrradianceTransfer : MonoBehaviour
 					move = Stop;
 				}
 
+				switch( currentPolygonContourValue )
+				{
+				case 3:
+				case 6:
+				case 9:
+				case 12:
+					if( currentPolygonContourValue == prevPolygonContourValue[1] && currentPolygonContourValue == prevPolygonContourValue[0] ) 
+					{
+						_numBatchVertices--;
+						numPolygonVertices--;
+					}
+					break;
+				default:
+					break;
+				}
+
 				viewPortSpaceVertexPos.x *= _irradianceMapInvBufferResolution.x;
 				viewPortSpaceVertexPos.y *= _irradianceMapInvBufferResolution.y;
 
-				_readWriteVertexBuffer.vertices[_numBatchVertices].flag = (uint)( _numBatchPolygons+1 );
-				_readWriteVertexBuffer.vertices[_numBatchVertices].position = viewPortSpaceVertexPos;
-				_readWriteVertexBuffer.vertices[_numBatchVertices].localIndex = (uint)numPolygonVertices;
-				_readWriteVertexBuffer.vertices[_numBatchVertices].lastLocalIndex = 0;
+				_batchVertices.buffer[_numBatchVertices].flag = 0;
+				_batchVertices.buffer[_numBatchVertices].prevIndex = (uint)(_numBatchVertices) - 1;
+				_batchVertices.buffer[_numBatchVertices].nextIndex = (uint)(_numBatchVertices) + 1;
+				_batchVertices.buffer[_numBatchVertices].position = viewPortSpaceVertexPos;
+				_batchVertices.buffer[_numBatchVertices].edge.Set( 0,0 );
+				_batchVertices.buffer[_numBatchVertices].edgeLength = 0.0f;
+				_batchVertices.buffer[_numBatchVertices].tripletArea = 0.0f;
 
 				_numBatchVertices++;
 				numPolygonVertices++;
 
-				if( _numBatchVertices >= _readWriteVertexBuffer.Length )
+				if( _numBatchVertices >= _batchVertices.Length )
 				{
-					_readWriteVertexBuffer.Resize( _readWriteVertexBuffer.Length + GPUGroupSize );
+					_batchVertices.Resize( _batchVertices.Length + GPUGroupSize );
 				}
+
+				prevPolygonContourValue[0] = prevPolygonContourValue[1];
+				prevPolygonContourValue[1] = currentPolygonContourValue;
 			}
 
-			irradiancePolygon.Vertices = new Vector3[numPolygonVertices];
+			// loop ajacency data
 
-			// complete vertex data
-			for( int j=irradiancePolygon.BatchIndex; j<irradiancePolygon.BatchIndex+numPolygonVertices; j++ )
-			{
-				_readWriteVertexBuffer.vertices[j].lastLocalIndex = (uint)( numPolygonVertices-1 );
-			}
+			uint startVertexIndex = (uint)( irradiancePolygon.BatchIndex );
+			uint endVertexIndex = (uint)( _numBatchVertices-1 );
+
+			_batchVertices.buffer[startVertexIndex].prevIndex = endVertexIndex;
+			_batchVertices.buffer[endVertexIndex].nextIndex = startVertexIndex;
+
+			// fill batch polygon
+
+			_batchPolygons.buffer[_numBatchPolygons].startVertexIndex = startVertexIndex;
+			_batchPolygons.buffer[_numBatchPolygons].endVertexIndex = endVertexIndex;
+			_batchPolygons.buffer[_numBatchPolygons].numVertices = (uint)( numPolygonVertices );
+			_batchPolygons.buffer[_numBatchPolygons].planePosition = irradiancePolygon.pointOnPolygonPlane;
+			_batchPolygons.buffer[_numBatchPolygons].planeNormal = irradiancePolygon.polygonPlaneNormal;
+			_batchPolygons.buffer[_numBatchPolygons].planeTangent = irradiancePolygon.polygonPlaneTangent;
+			_batchPolygons.buffer[_numBatchPolygons].planeBitangent = irradiancePolygon.polygonPlaneBitangent;
+
+			irradiancePolygon.BatchIndex = _numBatchPolygons;
 
 			numPolygonVertices = 0;
-
-			// set polygon plane
-			_polygonPlanes[_numBatchPolygons].position = irradiancePolygon.pointOnPolygonPlane;
-			_polygonPlanes[_numBatchPolygons].normal = irradiancePolygon.polygonPlaneNormal;
 			_numBatchPolygons++;
-			if( _numBatchPolygons >= _polygonPlanes.Length )
+
+			if( _numBatchPolygons >= _batchPolygons.Length )
 			{
-				System.Array.Resize<PolygonPlane>( ref _polygonPlanes, _polygonPlanes.Length * 2 );
+				_batchPolygons.Resize( _batchPolygons.Length + GPUGroupSize );
 			}
 		}
 	}
 
 	void ProcessPolygonsGPU()
 	{
-		// align buffer size to GPUGroupSize
-
-		int batchBufferSize = ( _numBatchVertices / GPUGroupSize + ( ( _numBatchVertices % GPUGroupSize != 0 ) ? 1 : 0 ) ) * GPUGroupSize;
-		batchBufferSize = Mathf.Max( batchBufferSize, GPUGroupSize );
-
-		if( _readWriteVertexBuffer.Length > batchBufferSize )
+		if( _batchVertices.Length % GPUGroupSize != 0 )
 		{
-			_readWriteVertexBuffer.Resize( batchBufferSize );
+			Debug.LogError( "[IrradianceTransfer] ProcessPolygonsGPU() : ( _inBatchVertices.Length % GPUGroupSize != 0 )" );
+			return;
 		}
 
-		if( _inVertexBuffer == null || ( _inVertexBuffer != null && _inVertexBuffer.count != batchBufferSize ) )
+		System.Func<ComputeBuffer,int,int,ComputeBuffer> ResizeComputeBuffer = (computeBuffer, bufferSize, bufferStride) =>
 		{
-			if( _inVertexBuffer != null )
+			if( computeBuffer == null || ( computeBuffer != null && computeBuffer.count != bufferSize ) )
 			{
-				_inVertexBuffer.Release();
+				if( computeBuffer != null )
+				{
+					computeBuffer.Release();
+				}
+				computeBuffer = new ComputeBuffer( bufferSize, bufferStride );
 			}
-			_inVertexBuffer = new ComputeBuffer( batchBufferSize, Vertex.SizeOf );
-		}
+			return computeBuffer;
+		};
 
-		if( _outVertexBuffer == null || ( _outVertexBuffer != null && _outVertexBuffer.count != batchBufferSize ) )
+		_batchVertexBuffer = ResizeComputeBuffer( _batchVertexBuffer, _batchVertices.Length, BatchVertex.SizeOf );
+		_batchPolygonBuffer = ResizeComputeBuffer( _batchPolygonBuffer, _batchPolygons.Length, BatchPolygon.SizeOf );
+
+		_batchVertexBuffer.SetData( _batchVertices.buffer );
+		_batchPolygonBuffer.SetData( _batchPolygons.buffer );
+
+		// ComputeShader kernel
+
+		int processPolygonsKernel = _computeShader.FindKernel( "ProcessPolygons" );
+		if( processPolygonsKernel == -1 )
 		{
-			if( _outVertexBuffer != null )
-			{
-				_outVertexBuffer.Release();
-			}
-			_outVertexBuffer = new ComputeBuffer( batchBufferSize, Vertex.SizeOf );
-		}
-
-		if( _polygonPlaneBuffer == null || ( _polygonPlaneBuffer != null && _polygonPlaneBuffer.count != _polygonPlanes.Length ) )
-		{
-			if( _polygonPlaneBuffer != null )
-			{
-				_polygonPlaneBuffer.Release();
-			}
-			_polygonPlaneBuffer = new ComputeBuffer( _polygonPlanes.Length, PolygonPlane.SizeOf );
-		}
-
-		// set remaining vertices to be ignored by the algorithm
-
-		for( int i=_numBatchVertices; i<_readWriteVertexBuffer.vertices.Length; i++ )
-		{
-			_readWriteVertexBuffer.vertices[i].flag = 0;
-		}
-
-		// set buffers
-
-		_polygonPlaneBuffer.SetData( _polygonPlanes );
-		_inVertexBuffer.SetData( _readWriteVertexBuffer.vertices );
-
-		// ComputeShader kernels
-
-		int projectViewportVerticesKernel = _computeShader.FindKernel( "ProjectViewportVertices" );
-		if( projectViewportVerticesKernel == -1 )
-		{
-			Debug.LogError( "[IrradianceTransfer] SmoothAndReducePolygonsGPU() : unable to find ProjectViewportVertices kernel!" );
+			Debug.LogError( "[IrradianceTransfer] ProcessPolygonsGPU() : ( processPolygonsKernel == -1 )" );
 			return;
 		}
-
-		int smoothVerticesKernel = _computeShader.FindKernel( "SmoothVertices" );
-		if( smoothVerticesKernel == -1 )
-		{
-			Debug.LogError( "[IrradianceTransfer] SmoothAndReducePolygonsGPU() : unable to find SmoothVertices kernel!" );
-			return;
-		}
-
-		int reduceSemiParallelEdgesKernel = _computeShader.FindKernel( "ReduceSemiParallelEdges" );
-		if( reduceSemiParallelEdgesKernel == -1 )
-		{
-			Debug.LogError( "[IrradianceTransfer] SmoothAndReducePolygonsGPU() : unable to find ReduceSemiParallelEdges kernel!" );
-			return;
-		}
-
-		int reduceSparseSemiParallelEdgesKernel = _computeShader.FindKernel( "ReduceSparseSemiParallelEdges" );
-		if( reduceSparseSemiParallelEdgesKernel == -1 )
-		{
-			Debug.LogError( "[IrradianceTransfer] SmoothAndReducePolygonsGPU() : unable to find ReduceSparseSemiParallelEdges kernel!" );
-			return;
-		}
-
-		int mergeEvenVerticesKernel = _computeShader.FindKernel( "MergeEvenVertices" );
-		if( mergeEvenVerticesKernel == -1 )
-		{
-			Debug.LogError( "[IrradianceTransfer] SmoothAndReducePolygonsGPU() : unable to find MergeEvenVertices kernel!" );
-			return;
-		}
-
-		int mergeSparseVerticesKernel = _computeShader.FindKernel( "MergeSparseVertices" );
-		if( mergeSparseVerticesKernel == -1 )
-		{
-			Debug.LogError( "[IrradianceTransfer] SmoothAndReducePolygonsGPU() : unable to find MergeSparseVertices kernel!" );
-			return;
-		}
-
-		int removeLesserEdgesKernel = _computeShader.FindKernel( "RemoveLesserEdges" );
-		if( removeLesserEdgesKernel == -1 )
-		{
-			Debug.LogError( "[IrradianceTransfer] SmoothAndReducePolygonsGPU() : unable to find RemoveLesserEdges kernel!" );
-			return;
-		}
-
-		// project viewport vertices on to polygon planes
 
 		Vector3 lowerLeftViewportPoint = new Vector3( 0, 0, 0 );
 		Vector3 upperLeftViewportPoint = new Vector3( 0, 1, 0 );
@@ -431,6 +395,11 @@ public partial class IrradianceTransfer : MonoBehaviour
 		Ray upperLeftViewportRay = _offscreenCamera.ViewportPointToRay( upperLeftViewportPoint );
 		Ray lowerRightViewportRay = _offscreenCamera.ViewportPointToRay( lowerRightViewportPoint );
 		Ray upperRightViewportRay = _offscreenCamera.ViewportPointToRay( upperRightViewportPoint );
+
+		_computeShader.SetInt( "numBatchVertices", _numBatchVertices );
+		_computeShader.SetInt( "numBatchPolygons", _numBatchPolygons );
+		_computeShader.SetFloat( "redundantEdgeCosineAngle", Mathf.Cos( 3.33333f * Mathf.Deg2Rad ) );
+		_computeShader.SetInt( "minVertices", 5 );
 
 		_computeShader.SetVector( "lowerLeftViewportPoint", lowerLeftViewportPoint );
 		_computeShader.SetVector( "upperLeftViewportPoint", upperLeftViewportPoint );
@@ -445,128 +414,34 @@ public partial class IrradianceTransfer : MonoBehaviour
 		_computeShader.SetVector( "upperRightRayOrigin", upperRightViewportRay.origin );
 		_computeShader.SetVector( "upperRightRayDirection", upperRightViewportRay.direction );
 
-		_computeShader.SetBuffer( projectViewportVerticesKernel, "polygonPlanes", _polygonPlaneBuffer );
-		_computeShader.SetBuffer( projectViewportVerticesKernel, "inBuffer", _inVertexBuffer );
-		_computeShader.SetBuffer( projectViewportVerticesKernel, "outBuffer", _outVertexBuffer );
-		_computeShader.Dispatch( projectViewportVerticesKernel, GPUGroupSize, 1, 1 );
+		_computeShader.SetBuffer( processPolygonsKernel, "batchVertexBuffer", _batchVertexBuffer );
+		_computeShader.SetBuffer( processPolygonsKernel, "batchPolygonBuffer", _batchPolygonBuffer );
+		_computeShader.Dispatch( processPolygonsKernel, GPUGroupSize, 1, 1 );
+		_batchVertexBuffer.GetData( _batchVertices.buffer );
+		_batchPolygonBuffer.GetData( _batchPolygons.buffer );
 
-		PALUtils.Swap<ComputeBuffer>( ref _inVertexBuffer, ref _outVertexBuffer );
-
-		// smooth projected vertices
-
-		int totalSmoothSteps = GPUSmoothSteps + (int)(Resolution);
-		for( int smoothStep=0; smoothStep<totalSmoothSteps; smoothStep++ )
-		{
-			if( smoothStep > 0 )
-			{
-				PALUtils.Swap<ComputeBuffer>( ref _inVertexBuffer, ref _outVertexBuffer );
-			}
-			_computeShader.SetBuffer( smoothVerticesKernel, "inBuffer", _inVertexBuffer );
-			_computeShader.SetBuffer( smoothVerticesKernel, "outBuffer", _outVertexBuffer );
-			_computeShader.Dispatch( smoothVerticesKernel, GPUGroupSize, 1, 1 );
-		}
-
-		// reduce semi-parallel edges, pass 0
-
-		PALUtils.Swap<ComputeBuffer>( ref _inVertexBuffer, ref _outVertexBuffer );
-
-		_computeShader.SetBuffer( reduceSemiParallelEdgesKernel, "inBuffer", _inVertexBuffer );
-		_computeShader.SetBuffer( reduceSemiParallelEdgesKernel, "outBuffer", _outVertexBuffer );
-		_computeShader.SetFloat( "thresholdAngleCosine", Mathf.Cos( Mathf.Deg2Rad * GPUSemiParallelEdgeAngle0 ) );
-		_computeShader.Dispatch( reduceSemiParallelEdgesKernel, GPUGroupSize, 1, 1 );
-
-		// merge even vertices
-
-		PALUtils.Swap<ComputeBuffer>( ref _inVertexBuffer, ref _outVertexBuffer );
-
-		_computeShader.SetBuffer( mergeEvenVerticesKernel, "inBuffer", _inVertexBuffer );
-		_computeShader.SetBuffer( mergeEvenVerticesKernel, "outBuffer", _outVertexBuffer );
-		_computeShader.SetInt( "thresholdLastLocalIndex", GPUMergeEvenVerticesThreshold );
-		_computeShader.Dispatch( mergeEvenVerticesKernel, GPUGroupSize, 1, 1 );
-
-		// reduce semi-parallel edges, pass 1
-
-		PALUtils.Swap<ComputeBuffer>( ref _inVertexBuffer, ref _outVertexBuffer );
-
-		_computeShader.SetBuffer( reduceSparseSemiParallelEdgesKernel, "inBuffer", _inVertexBuffer );
-		_computeShader.SetBuffer( reduceSparseSemiParallelEdgesKernel, "outBuffer", _outVertexBuffer );
-		_computeShader.SetFloat( "thresholdAngleCosine", Mathf.Cos( Mathf.Deg2Rad * GPUSemiParallelEdgeAngle1 ) );
-		_computeShader.Dispatch( reduceSparseSemiParallelEdgesKernel, GPUGroupSize, 1, 1 );
-
-		// merge sparse vertices
-
-		PALUtils.Swap<ComputeBuffer>( ref _inVertexBuffer, ref _outVertexBuffer );
-
-		_computeShader.SetBuffer( mergeSparseVerticesKernel, "inBuffer", _inVertexBuffer );
-		_computeShader.SetBuffer( mergeSparseVerticesKernel, "outBuffer", _outVertexBuffer );
-		_computeShader.SetInt( "thresholdLastLocalIndex", GPUMergeSparseVerticesThreshold );
-		_computeShader.SetInt( "sparseness", 2 );
-		_computeShader.Dispatch( mergeSparseVerticesKernel, GPUGroupSize, 1, 1 );
-
-		// reduce semi-parallel edges, pass 2
-
-		PALUtils.Swap<ComputeBuffer>( ref _inVertexBuffer, ref _outVertexBuffer );
-
-		_computeShader.SetBuffer( reduceSparseSemiParallelEdgesKernel, "inBuffer", _inVertexBuffer );
-		_computeShader.SetBuffer( reduceSparseSemiParallelEdgesKernel, "outBuffer", _outVertexBuffer );
-		_computeShader.SetFloat( "thresholdAngleCosine", Mathf.Cos( Mathf.Deg2Rad * GPUSemiParallelEdgeAngle2 ) );
-		_computeShader.Dispatch( reduceSparseSemiParallelEdgesKernel, GPUGroupSize, 1, 1 );
-
-		// remove lesser edges
-
-		for( int removeStep=0; removeStep<3; removeStep++ )
-		{
-			PALUtils.Swap<ComputeBuffer>( ref _inVertexBuffer, ref _outVertexBuffer );
-
-			switch( removeStep )
-			{
-			case 0:
-				_computeShader.SetFloat( "thresholdAngleCosine", Mathf.Cos( Mathf.Deg2Rad * GPUEdgeAngle0 ) );
-				_computeShader.SetFloat( "thresholdEdgeRatio", GPUEdgeRatio0 );
-				break;
-			case 1:
-				_computeShader.SetFloat( "thresholdAngleCosine", Mathf.Cos( Mathf.Deg2Rad * GPUEdgeAngle1 ) );
-				_computeShader.SetFloat( "thresholdEdgeRatio", GPUEdgeRatio1 );
-				break;
-			case 2:
-				_computeShader.SetFloat( "thresholdAngleCosine", Mathf.Cos( Mathf.Deg2Rad * GPUEdgeAngle2 ) );
-				_computeShader.SetFloat( "thresholdEdgeRatio", GPUEdgeRatio2 );
-				break;
-			default:
-				break;
-			}
-
-			_computeShader.SetBuffer( removeLesserEdgesKernel, "inBuffer", _inVertexBuffer );
-			_computeShader.SetBuffer( removeLesserEdgesKernel, "outBuffer", _outVertexBuffer );
-			_computeShader.Dispatch( removeLesserEdgesKernel, GPUGroupSize, 1, 1 );
-		}
-
-		// get data
-
-		_outVertexBuffer.GetData( _readWriteVertexBuffer.vertices );
-
+		int batchPolygonIndex = 0;
 		for( int i=0; i<_irradiancePolygons.Length; i++ )
 		{
 			IrradiancePolygon irradiancePolygon = _irradiancePolygons[i];
 			if( irradiancePolygon == null ) continue;
 
-			int numPolygonVertices = irradiancePolygon.Vertices.Length;
-			int numReducedVertices = 0;
-			int startVertex = irradiancePolygon.BatchIndex;
+			int vertexIndex = (int)( _batchPolygons.buffer[batchPolygonIndex].startVertexIndex );
+			int numPolygonVertices = (int)( _batchPolygons.buffer[batchPolygonIndex].numVertices );
+			irradiancePolygon.Vertices = new Vector3[numPolygonVertices];
 
 			for( int j=0; j<numPolygonVertices; j++ )
 			{
-				if( _readWriteVertexBuffer.vertices[startVertex+j].flag == 1 )
-				{
-					irradiancePolygon.Vertices[numReducedVertices] = _readWriteVertexBuffer.vertices[startVertex+j].position;
-					numReducedVertices++;
-				}
+				irradiancePolygon.Vertices[j] = (
+					irradiancePolygon.pointOnPolygonPlane +					
+					_batchVertices.buffer[vertexIndex].position.x * irradiancePolygon.polygonPlaneTangent +
+					_batchVertices.buffer[vertexIndex].position.y * irradiancePolygon.polygonPlaneBitangent
+				);
+				vertexIndex = (int)( _batchVertices.buffer[vertexIndex].nextIndex );
 			}
 
-			if( numReducedVertices < numPolygonVertices )
-			{
-				System.Array.Resize<Vector3>( ref irradiancePolygon.Vertices, numReducedVertices );
-			}
+			batchPolygonIndex++;
 		}
+
 	}
 }

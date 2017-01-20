@@ -38,7 +38,7 @@ int bufferWidth;
 int bufferHeight;
 
 [numthreads(GROUPSIZE,1,1)]
-void MarchingSquares (uint3 id : SV_DispatchThreadID)
+void MarchingSquares(uint3 id : SV_DispatchThreadID)
 {
 	uint i = id.x;
 
@@ -94,27 +94,35 @@ void MarchingSquares (uint3 id : SV_DispatchThreadID)
 
 //////////////////////////////////////////////////////////////////////////////////////
 
-struct PolygonPlane
+struct BatchVertex
 {
-	float3 position;
-	float3 normal; 
+	uint   flag;
+	uint   prevIndex;
+	uint   nextIndex;
+	float2 position;
+	float2 edge;
+	float  edgeLength;
+	float  tripletArea;
 };
 
-struct Vertex
+struct BatchPolygon
 {
-	uint    flag;
-	uint    localIndex;
-	uint    lastLocalIndex;
-	float3  position;
+	uint   startVertexIndex;
+	uint   endVertexIndex;
+	uint   numVertices;
+	float3 planePosition;
+	float3 planeNormal;
+	float3 planeTangent;
+	float3 planeBitangent;
 };
 
-RWStructuredBuffer<Vertex> inBuffer;
-RWStructuredBuffer<Vertex> outBuffer;
-RWStructuredBuffer<PolygonPlane> polygonPlanes;
+RWStructuredBuffer<BatchVertex> batchVertexBuffer;
+RWStructuredBuffer<BatchPolygon> batchPolygonBuffer;
 
-//////////////////////////////////////////////////////////////////////////////////////
-
-#pragma kernel ProjectViewportVertices
+int numBatchVertices;
+int numBatchPolygons;
+float redundantEdgeCosineAngle;
+int minVertices;
 
 float4 lowerLeftViewportPoint;
 float4 upperLeftViewportPoint;
@@ -130,6 +138,10 @@ float4 lowerRightRayDirection;
 float4 upperRightRayOrigin;
 float4 upperRightRayDirection;
 
+//////////////////////////////////////////////////////////////////////////////////////
+
+#pragma kernel ProcessPolygons
+
 float TriangleAreaTimesTwo2D(float2 a, float2 b, float2 c)
 {
 	return ( b.x - a.x ) * ( c.y - a.y ) - ( b.y - a.y ) * ( c.x - a.x );
@@ -137,24 +149,340 @@ float TriangleAreaTimesTwo2D(float2 a, float2 b, float2 c)
 
 float3 BarycentricCoords2D(float2 a, float2 b, float2 c, float2 p)
 {
-	float invTriArea = 1.0f / TriangleAreaTimesTwo2D( a, b, c );
+	float invTriArea = 1.0 / TriangleAreaTimesTwo2D( a, b, c );
 	float u = TriangleAreaTimesTwo2D( b, c, p ) * invTriArea;
 	float v = TriangleAreaTimesTwo2D( c, a, p ) * invTriArea;
 	float w = TriangleAreaTimesTwo2D( a, b, p ) * invTriArea;
 	return float3( u,v,w );
 }
 
-[numthreads(GROUPSIZE,1,1)]
-void ProjectViewportVertices(uint3 id : SV_DispatchThreadID)
+float TripletArea(float2 v1, float2 v2, float2 v3)
 {
-	uint index = id.x;
+	return abs( 0.5 * ( -v2.x*v1.y + v3.x*v1.y + v1.x*v2.y - v3.x*v2.y - v1.x*v3.y + v2.x*v3.y ) );
+}
 
-	if( inBuffer[index].flag > 0 )
+float ClockwiseAngle(float2 v1, float2 v2)
+{
+	float result = atan2( v1.x*v2.y - v1.y*v2.x, v1.x*v2.x + v1.y*v2.y );
+	if( result > 0 )
+	{
+		result = -( 3.1415926 * 2 - result );
+	}
+	return -result;
+}
+
+void RemoveVertex(uint polygonIndex, uint vertexIndex, bool updateEdge, bool updateTriplets)
+{
+	// update ajacency
+
+	uint prevIndex = batchVertexBuffer[vertexIndex].prevIndex;
+	uint nextIndex = batchVertexBuffer[vertexIndex].nextIndex;
+
+	batchVertexBuffer[prevIndex].nextIndex = nextIndex;
+	batchVertexBuffer[nextIndex].prevIndex = prevIndex;
+
+	// update edge
+
+	if( updateEdge )
+	{
+		float2 prevEdge = ( batchVertexBuffer[nextIndex].position - batchVertexBuffer[prevIndex].position );
+		float prevEdgeLength = length( prevEdge );
+		prevEdge *= 1.0f / prevEdgeLength;
+
+		batchVertexBuffer[prevIndex].edge = prevEdge;
+		batchVertexBuffer[prevIndex].edgeLength = prevEdgeLength;
+	}
+
+	// update triplets
+
+	if( updateTriplets )
+	{
+		batchVertexBuffer[prevIndex].tripletArea = TripletArea( 
+			batchVertexBuffer[batchVertexBuffer[prevIndex].prevIndex].position,
+			batchVertexBuffer[prevIndex].position,
+			batchVertexBuffer[nextIndex].position
+		);
+
+		batchVertexBuffer[nextIndex].tripletArea = TripletArea( 
+			batchVertexBuffer[prevIndex].position,
+			batchVertexBuffer[nextIndex].position,
+			batchVertexBuffer[batchVertexBuffer[nextIndex].nextIndex].position
+		);
+	}
+
+	// update polygon
+
+	if( vertexIndex == batchPolygonBuffer[polygonIndex].startVertexIndex )
+	{
+		batchPolygonBuffer[polygonIndex].startVertexIndex = nextIndex;
+	}
+	else if( vertexIndex == batchPolygonBuffer[polygonIndex].endVertexIndex )
+	{
+		batchPolygonBuffer[polygonIndex].endVertexIndex = prevIndex;
+	}
+
+	batchPolygonBuffer[polygonIndex].numVertices--;
+}
+
+void InitializeEdges(uint polygonIndex)
+{
+	uint startIndex = batchPolygonBuffer[polygonIndex].startVertexIndex;
+
+	uint currIndex = startIndex;
+	uint nextIndex = batchVertexBuffer[currIndex].nextIndex;
+
+	[loop]
+	do
+	{
+		float2 edge = ( batchVertexBuffer[nextIndex].position - batchVertexBuffer[currIndex].position );
+		float edgeLength = length( edge );
+		edge *= 1.0f / edgeLength;
+
+		batchVertexBuffer[currIndex].edge = edge;
+		batchVertexBuffer[currIndex].edgeLength = edgeLength;
+
+		currIndex = nextIndex;
+		nextIndex = batchVertexBuffer[currIndex].nextIndex;
+	}
+	while( currIndex != startIndex );
+}
+
+void InitializeTriplets(uint polygonIndex)
+{
+	uint startIndex = batchPolygonBuffer[polygonIndex].startVertexIndex;
+
+	uint currIndex = startIndex;
+	uint prevIndex = batchVertexBuffer[currIndex].prevIndex;
+	uint nextIndex = batchVertexBuffer[currIndex].nextIndex;
+
+	[loop]
+	do
+	{
+		batchVertexBuffer[currIndex].tripletArea = TripletArea( 
+			batchVertexBuffer[prevIndex].position, 
+			batchVertexBuffer[currIndex].position, 
+			batchVertexBuffer[nextIndex].position
+		);
+
+		prevIndex = currIndex;
+		currIndex = nextIndex;
+		nextIndex = batchVertexBuffer[currIndex].nextIndex;
+	}
+	while( currIndex != startIndex );
+}
+
+void RemoveRedundantEdges(uint polygonIndex, float edgeAngleCosine)
+{
+	uint currIndex = batchPolygonBuffer[polygonIndex].startVertexIndex;
+	uint prevIndex = batchVertexBuffer[currIndex].prevIndex;
+	uint nextIndex = batchVertexBuffer[currIndex].nextIndex;
+
+	[loop]
+	do
+	{
+		float2 prevEdge = batchVertexBuffer[prevIndex].edge;
+		float2 nextEdge = batchVertexBuffer[currIndex].edge;
+
+		if( dot( prevEdge, nextEdge ) > edgeAngleCosine )
+		{
+			RemoveVertex( polygonIndex, currIndex, true, false );
+
+			currIndex = nextIndex;
+			prevIndex = batchVertexBuffer[currIndex].prevIndex;
+			nextIndex = batchVertexBuffer[currIndex].nextIndex;
+		}
+		else
+		{
+			prevIndex = currIndex;
+			currIndex = nextIndex;
+			nextIndex = batchVertexBuffer[currIndex].nextIndex;
+		}
+	}
+	while( currIndex != batchPolygonBuffer[polygonIndex].startVertexIndex );
+}
+
+void RemoveLocalConcavity(uint polygonIndex, uint concavityType)
+{
+	uint currIndex = batchPolygonBuffer[polygonIndex].startVertexIndex;
+	uint prevIndex = batchVertexBuffer[currIndex].prevIndex;
+	uint nextIndex = batchVertexBuffer[currIndex].nextIndex;
+	uint precIndex = batchVertexBuffer[prevIndex].prevIndex;
+
+	[loop]
+	do
+	{
+		float2 precEdge = -batchVertexBuffer[precIndex].edge;
+		float2 prevEdge = batchVertexBuffer[prevIndex].edge;
+		float2 virtualEdge = ( batchVertexBuffer[nextIndex].position - batchVertexBuffer[prevIndex].position );
+
+		float virtualEdgeLength = length( virtualEdge );
+		virtualEdge *= 1.0f / virtualEdgeLength;
+
+		// cavity
+		if( ( concavityType == 0 ) && ( ClockwiseAngle( precEdge, prevEdge ) > ClockwiseAngle( precEdge, virtualEdge ) ) )
+		{				
+			batchVertexBuffer[currIndex].flag = 1;
+		}
+		// ledge
+		else if( ( concavityType == 1 ) && ( ClockwiseAngle( precEdge, prevEdge ) < ClockwiseAngle( precEdge, virtualEdge ) ) )
+		{
+			batchVertexBuffer[currIndex].flag = 1;
+		}
+
+		precIndex = prevIndex;
+		prevIndex = currIndex;
+		currIndex = nextIndex;
+		nextIndex = batchVertexBuffer[currIndex].nextIndex;
+	}
+	while( currIndex != batchPolygonBuffer[polygonIndex].startVertexIndex );
+
+	currIndex = batchPolygonBuffer[polygonIndex].startVertexIndex;
+
+	[loop]
+	do
+	{
+		if( batchVertexBuffer[currIndex].flag == 1 )
+		{
+			uint indexToRemove = currIndex;
+			currIndex = batchVertexBuffer[currIndex].nextIndex;
+			RemoveVertex( polygonIndex, indexToRemove, true, false );
+		}
+		else
+		{
+			currIndex = batchVertexBuffer[currIndex].nextIndex;
+		}
+	}
+	while( currIndex != batchPolygonBuffer[polygonIndex].startVertexIndex );
+}
+
+void GetPolygonTripletStatistics(uint polygonIndex, out float averageTripletArea, out float lowerAverageTripletArea, out float upperAverageTripletArea)
+{
+	averageTripletArea = 0;
+	lowerAverageTripletArea = 0;
+	upperAverageTripletArea = 0;
+
+	uint startVertexIndex = batchPolygonBuffer[polygonIndex].startVertexIndex;
+	uint vertexIndex = startVertexIndex;
+
+	[loop]
+	do
+	{
+		averageTripletArea += batchVertexBuffer[vertexIndex].tripletArea;
+		vertexIndex = batchVertexBuffer[vertexIndex].nextIndex;
+	}
+	while( vertexIndex != startVertexIndex );
+
+	if( batchPolygonBuffer[polygonIndex].numVertices > 0 )
+	{
+		averageTripletArea /= batchPolygonBuffer[polygonIndex].numVertices;
+	}
+
+	uint numLowerAverageTriplets = 0;
+	uint numUpperAverageTriplets = 0;
+	vertexIndex = startVertexIndex;
+
+	[loop]
+	do
+	{
+		float tripletArea = batchVertexBuffer[vertexIndex].tripletArea;
+
+		if( tripletArea < averageTripletArea )
+		{
+			lowerAverageTripletArea += tripletArea;
+			numLowerAverageTriplets++;
+		}
+		else
+		{
+			upperAverageTripletArea += tripletArea;
+			numUpperAverageTriplets++;
+		}
+		vertexIndex = batchVertexBuffer[vertexIndex].nextIndex;
+	}
+	while( vertexIndex != startVertexIndex );
+
+	if( numLowerAverageTriplets > 0 )
+	{
+		lowerAverageTripletArea /= numLowerAverageTriplets;
+	}
+
+	if( numUpperAverageTriplets > 0 )
+	{
+		upperAverageTripletArea /= numUpperAverageTriplets;
+	}
+}
+
+void RemoveLesserTriplets(uint polygonIndex, float tripletAreaThreshold)
+{
+	uint currIndex = batchPolygonBuffer[polygonIndex].startVertexIndex;
+	uint nextIndex = batchVertexBuffer[currIndex].nextIndex;
+
+	[loop]
+	do
+	{
+		float tripletArea = batchVertexBuffer[currIndex].tripletArea;
+
+		if( tripletArea < tripletAreaThreshold )
+		{
+			RemoveVertex( polygonIndex, currIndex, true, true );
+
+			currIndex = nextIndex;
+			nextIndex = batchVertexBuffer[currIndex].nextIndex;
+		}
+		else
+		{
+			currIndex = nextIndex;
+			nextIndex = batchVertexBuffer[currIndex].nextIndex;
+		}
+	}
+	while( currIndex != batchPolygonBuffer[polygonIndex].startVertexIndex );
+}
+
+float GetPolygonArea(uint polygonIndex)
+{
+	float polygonArea = 0.0f;
+
+	uint startVertexIndex = batchPolygonBuffer[polygonIndex].startVertexIndex;
+
+	uint currIndex = startVertexIndex;
+	uint prevIndex = batchVertexBuffer[currIndex].prevIndex;
+
+	float2 v0 = batchVertexBuffer[prevIndex].position;
+	float2 v1 = float2( 0,0 );
+
+	[loop]
+	do
+	{
+		v1 = batchVertexBuffer[currIndex].position;
+		polygonArea += v0.x*v1.y - v1.x*v0.y;
+		v0 = v1;
+
+		prevIndex = currIndex;
+		currIndex = batchVertexBuffer[currIndex].nextIndex;
+	}
+	while( currIndex != startVertexIndex );
+
+	return -0.5f * polygonArea;
+}
+
+[numthreads(GROUPSIZE,1,1)]
+void ProcessPolygons(uint3 id : SV_DispatchThreadID)
+{
+	uint polygonIndex = id.x;
+
+	if( polygonIndex >= (uint)numBatchPolygons ) return;
+
+	uint startIndex = batchPolygonBuffer[polygonIndex].startVertexIndex;
+	uint index = startIndex;
+
+	// project vertices on to polygon planes
+
+	[loop]
+	do
 	{
 		float3 rayOrigin;
 		float3 rayDirection;
 
-		float3 uvw = BarycentricCoords2D( upperLeftViewportPoint.xy, lowerLeftViewportPoint.xy, lowerRightViewportPoint.xy, inBuffer[index].position.xy );
+		float3 uvw = BarycentricCoords2D( upperLeftViewportPoint.xy, lowerLeftViewportPoint.xy, lowerRightViewportPoint.xy, batchVertexBuffer[index].position );
 		if( uvw.x >= 0 && uvw.x <= 1 && uvw.y >= 0 && uvw.y <= 1 && uvw.z >= 0 && uvw.z <= 1 )
 		{
 			rayOrigin = upperLeftRayOrigin.xyz * uvw.x + lowerLeftRayOrigin.xyz * uvw.y + lowerRightRayOrigin.xyz * uvw.z;
@@ -162,444 +490,53 @@ void ProjectViewportVertices(uint3 id : SV_DispatchThreadID)
 		}
 		else
 		{
-			uvw = BarycentricCoords2D( lowerLeftViewportPoint.xy, lowerRightViewportPoint.xy, upperRightViewportPoint.xy, inBuffer[index].position.xy );
+			uvw = BarycentricCoords2D( lowerLeftViewportPoint.xy, lowerRightViewportPoint.xy, upperRightViewportPoint.xy, batchVertexBuffer[index].position );
 			rayOrigin = lowerLeftRayOrigin.xyz * uvw.x + lowerRightRayOrigin.xyz * uvw.y + upperRightRayOrigin.xyz * uvw.z;
 			rayDirection = normalize( lowerLeftRayDirection.xyz * uvw.x + lowerRightRayDirection.xyz * uvw.y + upperRightRayDirection.xyz * uvw.z );
 		}
 
-		uint planeIndex = inBuffer[index].flag - 1;
+		float3 w = rayOrigin - batchPolygonBuffer[polygonIndex].planePosition;
+		float distance = -dot( batchPolygonBuffer[polygonIndex].planeNormal, w ) / dot( batchPolygonBuffer[polygonIndex].planeNormal, rayDirection );
 
-		float3 w = rayOrigin - polygonPlanes[planeIndex].position;
-		float distance = -dot( polygonPlanes[planeIndex].normal, w ) / dot( polygonPlanes[planeIndex].normal, rayDirection );
+		float3 worldPos = rayOrigin + rayDirection * distance;
+		float3 worldOffset = worldPos - batchPolygonBuffer[polygonIndex].planePosition;
+		float2 planePos = float2( dot( worldOffset, batchPolygonBuffer[polygonIndex].planeTangent ), dot( worldOffset, batchPolygonBuffer[polygonIndex].planeBitangent ) );
 
-		if( distance > 0 )
-		{
-			outBuffer[index].flag = 1;
-			outBuffer[index].localIndex = inBuffer[index].localIndex;
-			outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
-			outBuffer[index].position = rayOrigin + rayDirection * distance;
-		}
-		else
-		{
-			outBuffer[index].flag = 0;
-			outBuffer[index].localIndex = inBuffer[index].localIndex;
-			outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
-			outBuffer[index].position = rayOrigin + rayDirection * distance;
-		}
+		batchVertexBuffer[index].position = planePos;
+
+		index = batchVertexBuffer[index].nextIndex;
 	}
-	else
+	while( index != startIndex );
+
+	InitializeEdges( polygonIndex );
+
+	RemoveRedundantEdges( polygonIndex, redundantEdgeCosineAngle );
+	if( batchPolygonBuffer[polygonIndex].numVertices <= (uint)minVertices ) return;
+
+	RemoveLocalConcavity( polygonIndex, 0 );
+	if( batchPolygonBuffer[polygonIndex].numVertices <= (uint)minVertices ) return;
+
+	RemoveRedundantEdges( polygonIndex, redundantEdgeCosineAngle );
+	if( batchPolygonBuffer[polygonIndex].numVertices <= (uint)minVertices ) return;
+
+	InitializeTriplets( polygonIndex );
+
+	uint prevNumVertices = batchPolygonBuffer[polygonIndex].numVertices + 1;
+	float polygonReferenceArea = GetPolygonArea( polygonIndex );
+	float polygonArea = polygonReferenceArea;
+
+	[loop]
+	while( prevNumVertices > batchPolygonBuffer[polygonIndex].numVertices && polygonArea > polygonReferenceArea * 0.995f )
 	{
-		outBuffer[index].flag = 0;
-		outBuffer[index].localIndex = inBuffer[index].localIndex;
-		outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
-		outBuffer[index].position = inBuffer[index].position;
-	}
-}
+		float averageTripletArea;
+		float lowerAverageTripletArea;
+		float upperAverageTripletArea;
 
-//////////////////////////////////////////////////////////////////////////////////////
+		prevNumVertices = batchPolygonBuffer[polygonIndex].numVertices;
+		GetPolygonTripletStatistics( polygonIndex, averageTripletArea, lowerAverageTripletArea, upperAverageTripletArea );
+		RemoveLesserTriplets( polygonIndex, lowerAverageTripletArea );
+		if( batchPolygonBuffer[polygonIndex].numVertices <= (uint)minVertices ) break;
 
-#pragma kernel SmoothVertices
-
-[numthreads(GROUPSIZE,1,1)]
-void SmoothVertices(uint3 id : SV_DispatchThreadID)
-{
-	uint index = id.x;
-
-	uint prevIndex = index;
-	if( inBuffer[index].localIndex == 0 )
-	{
-		prevIndex = index + inBuffer[index].lastLocalIndex;
-	}
-	else
-	{
-		prevIndex = index-1;
-	}
-
-	uint nextIndex;
-	if( inBuffer[index].localIndex == inBuffer[index].lastLocalIndex )
-	{
-		nextIndex = index - inBuffer[index].lastLocalIndex;
-	}
-	else
-	{
-		nextIndex = index+1;
-	}
-
-	float3 prevPosition = inBuffer[prevIndex].position;
-	float3 currPosition = inBuffer[index].position;
-	float3 nextPosition = inBuffer[nextIndex].position;
-
-	outBuffer[index].flag = inBuffer[index].flag;
-	outBuffer[index].localIndex = inBuffer[index].localIndex;
-	outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
-	outBuffer[index].position = ( prevPosition + currPosition + nextPosition ) / 3;
-}
-
-//////////////////////////////////////////////////////////////////////////////////////
-
-float thresholdAngleCosine;
-int   thresholdLastLocalIndex;
-float thresholdEdgeRatio;
-int   sparseness;
-
-#pragma kernel ReduceSemiParallelEdges
-
-uint GetPrevIndex(uint index)
-{
-	if( inBuffer[index].localIndex == 0 )
-	{
-		return index + inBuffer[index].lastLocalIndex;
-	}
-	else
-	{
-		return index-1;
-	}
-}
-
-uint GetNextIndex(uint index)
-{
-	if( inBuffer[index].localIndex == inBuffer[index].lastLocalIndex )
-	{
-		return index - inBuffer[index].lastLocalIndex;
-	}
-	else
-	{
-		return index+1;
-	}
-}
-
-[numthreads(GROUPSIZE,1,1)]
-void ReduceSemiParallelEdges(uint3 id : SV_DispatchThreadID)
-{
-	uint index = id.x;
-
-	if( inBuffer[index].flag == 1 )
-	{
-		uint prevIndex = GetPrevIndex( index );
-		uint nextIndex = GetNextIndex( index );
-
-		float3 prevPosition = inBuffer[prevIndex].position;
-		float3 currPosition = inBuffer[index].position;
-		float3 nextPosition = inBuffer[nextIndex].position;
-
-		float3 prevEdge = normalize( currPosition - prevPosition );
-		float3 currEdge = normalize( nextPosition - currPosition );
-
-		float edgeAngleCosine = dot( prevEdge, currEdge );
-
-		if( edgeAngleCosine > thresholdAngleCosine )
-		{
-			outBuffer[index].flag = 0;
-		}
-		else
-		{
-			outBuffer[index].flag = 1;
-		}
-		outBuffer[index].localIndex = inBuffer[index].localIndex;
-		outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
-		outBuffer[index].position = inBuffer[index].position;
-	}
-	else
-	{
-		outBuffer[index].flag = inBuffer[index].flag;
-		outBuffer[index].localIndex = inBuffer[index].localIndex;
-		outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
-		outBuffer[index].position = inBuffer[index].position;
-	}
-}
-
-//////////////////////////////////////////////////////////////////////////////////////
-
-#pragma kernel MergeEvenVertices
-
-[numthreads(GROUPSIZE,1,1)]
-void MergeEvenVertices(uint3 id : SV_DispatchThreadID)
-{
-	uint index = id.x;
-
-	if( inBuffer[index].flag == 1 && inBuffer[index].lastLocalIndex + 1 > (uint)thresholdLastLocalIndex )
-	{
-		if( inBuffer[index].localIndex % 2 == 0 )
-		{
-			uint prevIndex = GetPrevIndex( index );
-			uint nextIndex = GetNextIndex( index );
-
-			if( inBuffer[prevIndex].flag == 1 && inBuffer[nextIndex].flag == 1 )
-			{
-				outBuffer[index].position = ( inBuffer[prevIndex].position + inBuffer[index].position + inBuffer[nextIndex].position ) / 3;
-			}
-			else if( inBuffer[prevIndex].flag == 1 )
-			{
-				outBuffer[index].position = ( inBuffer[prevIndex].position + inBuffer[index].position ) / 2;
-			}
-			else if( inBuffer[nextIndex].flag == 1 )
-			{
-				outBuffer[index].position = ( inBuffer[nextIndex].position + inBuffer[index].position ) / 2;
-			}
-			else
-			{
-				outBuffer[index].position = inBuffer[index].position;
-			}
-		}
-		else
-		{
-			outBuffer[index].flag = 0;
-			outBuffer[index].localIndex = inBuffer[index].localIndex;
-			outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
-			outBuffer[index].position = inBuffer[index].position;
-		}
-	}
-	else
-	{
-		outBuffer[index].flag = inBuffer[index].flag;
-		outBuffer[index].localIndex = inBuffer[index].localIndex;
-		outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
-		outBuffer[index].position = inBuffer[index].position;
-	}
-}
-
-//////////////////////////////////////////////////////////////////////////////////////
-
-#pragma kernel ReduceSparseSemiParallelEdges
-
-uint GetPrevIndexWithFlag(uint index, uint flag)
-{
-	uint prevIndex = GetPrevIndex( index );
-	while( prevIndex != index && inBuffer[prevIndex].flag != flag )
-	{
-		prevIndex = GetPrevIndex( prevIndex );
-	}
-	return prevIndex;
-}
-
-uint GetNextIndexWithFlag(uint index, uint flag)
-{
-	uint nextIndex = GetNextIndex( index );
-	while( nextIndex != index && inBuffer[nextIndex].flag != flag )
-	{
-		nextIndex = GetNextIndex( nextIndex );
-	}
-	return nextIndex;	
-}
-
-[numthreads(GROUPSIZE,1,1)]
-void ReduceSparseSemiParallelEdges(uint3 id : SV_DispatchThreadID)
-{
-	uint index = id.x;
-
-	if( inBuffer[index].flag == 1 )
-	{
-		uint prevIndex = GetPrevIndexWithFlag( index, 1 );
-		uint nextIndex = GetNextIndexWithFlag( index, 1 );
-
-		float3 prevPosition = inBuffer[prevIndex].position;
-		float3 currPosition = inBuffer[index].position;
-		float3 nextPosition = inBuffer[nextIndex].position;
-
-		float3 prevEdge = normalize( currPosition - prevPosition );
-		float3 currEdge = normalize( nextPosition - currPosition );
-
-		float edgeAngleCosine = dot( prevEdge, currEdge );
-
-		if( edgeAngleCosine > thresholdAngleCosine )
-		{
-			outBuffer[index].flag = 0;
-			outBuffer[index].localIndex = inBuffer[index].localIndex;
-			outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
-			outBuffer[index].position = inBuffer[index].position;
-		}
-		else
-		{
-			outBuffer[index].flag = inBuffer[index].flag;
-			outBuffer[index].localIndex = inBuffer[index].localIndex;
-			outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
-			outBuffer[index].position = inBuffer[index].position;
-		}
-	}
-	else
-	{
-		outBuffer[index].flag = inBuffer[index].flag;
-		outBuffer[index].localIndex = inBuffer[index].localIndex;
-		outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
-		outBuffer[index].position = inBuffer[index].position;
-	}
-}
-
-//////////////////////////////////////////////////////////////////////////////////////
-
-#pragma kernel MergeSparseVertices
-
-uint GetPrevSparseIndex(uint index)
-{
-	for( uint i=0; i<(uint)sparseness; i++ )
-	{
-		if( inBuffer[index].localIndex == 0 )
-		{
-			index = index + inBuffer[index].lastLocalIndex;
-		}
-		else
-		{
-			index = index-1;
-		}
-	}
-	return index;
-}
-
-uint GetNextSparseIndex(uint index)
-{
-	for( uint i=0; i<(uint)sparseness; i++ )
-	{
-		if( inBuffer[index].localIndex == inBuffer[index].lastLocalIndex )
-		{
-			index = index - inBuffer[index].lastLocalIndex;
-		}
-		else
-		{
-			index = index+1;
-		}
-	}
-	return index;
-}
-
-[numthreads(GROUPSIZE,1,1)]
-void MergeSparseVertices(uint3 id : SV_DispatchThreadID)
-{
-	uint index = id.x;
-
-	if( inBuffer[index].flag == 1 && inBuffer[index].lastLocalIndex + 1 > (uint)thresholdLastLocalIndex )
-	{
-		uint sparseIndex = inBuffer[index].localIndex / (uint)sparseness;
-		if( sparseIndex % 2 == 0 )
-		{
-			uint prevIndex = GetPrevSparseIndex( index );
-			uint nextIndex = GetNextSparseIndex( index );
-
-			if( inBuffer[prevIndex].flag == 1 && inBuffer[nextIndex].flag == 1 )
-			{
-				outBuffer[index].position = ( inBuffer[prevIndex].position + inBuffer[index].position + inBuffer[nextIndex].position ) / 3;
-			}
-			else if( inBuffer[prevIndex].flag == 1 )
-			{
-				outBuffer[index].position = ( inBuffer[prevIndex].position + inBuffer[index].position ) / 2;
-			}
-			else if( inBuffer[nextIndex].flag == 1 )
-			{
-				outBuffer[index].position = ( inBuffer[nextIndex].position + inBuffer[index].position ) / 2;
-			}
-
-			outBuffer[index].flag = inBuffer[index].flag;
-			outBuffer[index].localIndex = inBuffer[index].localIndex;
-			outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
-		}
-		else
-		{
-			outBuffer[index].flag = 0;
-			outBuffer[index].localIndex = inBuffer[index].localIndex;
-			outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
-			outBuffer[index].position = inBuffer[index].position;
-		}
-	}
-	else
-	{
-		outBuffer[index].flag = inBuffer[index].flag;
-		outBuffer[index].localIndex = inBuffer[index].localIndex;
-		outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
-		outBuffer[index].position = inBuffer[index].position;
-	}
-}
-
-//////////////////////////////////////////////////////////////////////////////////////
-
-#pragma kernel RemoveLesserEdges
-
-[numthreads(GROUPSIZE,1,1)]
-void RemoveLesserEdges(uint3 id : SV_DispatchThreadID)
-{
-	uint index = id.x;
-
-	if( inBuffer[index].flag == 1 )
-	{
-		uint prevIndex = GetPrevIndexWithFlag( index, 1 );
-		uint nextIndex = GetNextIndexWithFlag( index, 1 );
-		uint precedingIndex = GetPrevIndexWithFlag( prevIndex, 1 );
-		uint succedingIndex = GetNextIndexWithFlag( nextIndex, 1 );
-
-		float3 prevPosition = inBuffer[prevIndex].position;
-		float3 currPosition = inBuffer[index].position;
-		float3 nextPosition = inBuffer[nextIndex].position;
-		float3 precedingPosition = inBuffer[precedingIndex].position;
-		float3 succedingPosition = inBuffer[succedingIndex].position;
-
-		float3 prevEdge = ( currPosition - prevPosition );
-		float3 currEdge = ( nextPosition - currPosition );
-		float3 nextEdge = ( succedingPosition - nextPosition );
-
-		float prevEdgeLength = length( prevEdge );
-		float currEdgeLength = length( currEdge );
-		float nextEdgeLength = length( nextEdge );
-
-		if( prevEdgeLength * thresholdEdgeRatio >= currEdgeLength || nextEdgeLength * thresholdEdgeRatio >= currEdgeLength )
-		{
-			prevEdge *= 1.0f / prevEdgeLength;
-			nextEdge *= 1.0f / nextEdgeLength;
-
-			float edgeAngleCosine = dot( prevEdge, nextEdge );
-
-			if( edgeAngleCosine > thresholdAngleCosine )
-			{
-				outBuffer[index].position = ( currPosition + nextPosition ) / 2;
-			}
-			else
-			{				
-				outBuffer[index].position = inBuffer[index].position;
-			}
-			outBuffer[index].flag = inBuffer[index].flag;
-			outBuffer[index].localIndex = inBuffer[index].localIndex;
-			outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
-		}
-		else
-		{
-			prevEdge = ( prevPosition - precedingPosition );
-			currEdge = ( currPosition - prevPosition );
-			nextEdge = ( nextPosition - currPosition );
-
-			prevEdgeLength = length( prevEdge );
-			currEdgeLength = length( currEdge );
-			nextEdgeLength = length( nextEdge );
-
-			if( prevEdgeLength * thresholdEdgeRatio >= currEdgeLength || nextEdgeLength * thresholdEdgeRatio >=  currEdgeLength )
-			{
-				prevEdge *= 1.0f / prevEdgeLength;
-				nextEdge *= 1.0f / nextEdgeLength;
-
-				float edgeAngleCosine = dot( prevEdge, nextEdge );
-
-				if( edgeAngleCosine > thresholdAngleCosine )
-				{
-					outBuffer[index].flag = 0;
-				}
-				else
-				{
-					outBuffer[index].flag = inBuffer[index].flag;
-				}
-				outBuffer[index].localIndex = inBuffer[index].localIndex;
-				outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
-				outBuffer[index].position = inBuffer[index].position;
-			}
-			else
-			{
-				outBuffer[index].flag = inBuffer[index].flag;
-				outBuffer[index].localIndex = inBuffer[index].localIndex;
-				outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
-				outBuffer[index].position = inBuffer[index].position;
-			}
-		}
-	}
-	else
-	{
-		outBuffer[index].flag = inBuffer[index].flag;
-		outBuffer[index].localIndex = inBuffer[index].localIndex;
-		outBuffer[index].lastLocalIndex = inBuffer[index].lastLocalIndex;
-		outBuffer[index].position = inBuffer[index].position;
+		polygonArea = GetPolygonArea( polygonIndex );
 	}
 }

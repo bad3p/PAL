@@ -22,7 +22,7 @@
 //
 
 #define FORCE_CPU_MODE
-//#undef FORCE_CPU_MODE
+#undef FORCE_CPU_MODE
 
 using UnityEngine;
 using System.Collections;
@@ -109,7 +109,7 @@ public partial class IrradianceTransfer : MonoBehaviour
 	// algorithm constants
 	const float MaxPolygonPlaneNormalAngle = 80.0f;
 	const float IlluminationBufferIntensityScale = 0.01f;//0.125f;
-	const float OutlineOffset = 0.125f;
+	const float OutlineOffset = 0.01f;
 
 	// RGBA-to-float decoding constants (from UnityCG.cginc) for Color32 values
 	const float kDecodeRedFactor = (1/255.0f);
@@ -119,59 +119,65 @@ public partial class IrradianceTransfer : MonoBehaviour
 
 	// ComputeShader constants
 	const int GPUGroupSize = 128;
-	const int GPUSmoothSteps = 2; // this is the base value, resolutions larger than 16x16 will use increased amount of smooth steps
-	const int GPUMergeEvenVerticesThreshold = 12;
-	const int GPUMergeSparseVerticesThreshold = 24;
-	const float GPUSemiParallelEdgeAngle0 = 0.1f;//0.5f;
-	const float GPUSemiParallelEdgeAngle1 = 1.0f;//1.5f;
-	const float GPUSemiParallelEdgeAngle2 = 2.0f;//4.5f;
-	const float GPUEdgeRatio0 = 0.1f;
-	const float GPUEdgeAngle0 = 160.0f;
-	const float GPUEdgeRatio1 = 0.25f;
-	const float GPUEdgeAngle1 = 75.0f;
-	const float GPUEdgeRatio2 = 0.5f;
-	const float GPUEdgeAngle2 = 60.0f;
 	#endregion
 
 	#region EmbeddedTypes
-	public struct PolygonPlane
+	public class ArrayBuffer<T>
 	{
-		public Vector3 position;    // 3 * sizeof(float) = 12
-		public Vector3 normal;      // 3 * sizeof(float) = 12
+		public T[] buffer;
 
-		public const int SizeOf = 24; // stride = 24
+		public ArrayBuffer()
+		{
+			buffer = new T[0];
+		}
+
+		public ArrayBuffer(int size)
+		{
+			buffer = new T[size];
+		}
+
+		public void Resize(int newSize)
+		{
+			System.Array.Resize<T>( ref buffer, newSize );
+		}
+
+		public int Length
+		{
+			get { return buffer.Length; }
+		}
+
+		static public void Swap(ref ArrayBuffer<T> buffer0, ref ArrayBuffer<T> buffer1)
+		{
+			ArrayBuffer<T> temp = buffer0;
+			buffer0 = buffer1;
+			buffer1 = temp;
+		}
 	};
 
-	public struct Vertex
-	{
-		public uint    flag;           // sizeof(int) = 4
-		public uint    localIndex;     // sizeof(int) = 4
-		public uint    lastLocalIndex; // sizeof(int) = 4
-		public Vector3 position;       // 3 * sizeof(float) = 12
+	public struct BatchVertex
+	{		
+		public uint    flag;            // sizeof(uint) = 4
+		public uint    prevIndex;       // sizeof(uint) = 4
+		public uint    nextIndex;       // sizeof(uint) = 4
+		public Vector2 position;        // 2 * sizeof(float) = 8
+		public Vector2 edge;            // 2 * sizeof(float) = 8
+		public float   edgeLength;      // sizeof(float) = 4
+		public float   tripletArea;     // sizeof(float) = 4
 
-		public const int SizeOf = 24; // stride = 24
+		public const int SizeOf = 36; //  ComputeShader stride
 	};
 
-	public class VertexBuffer
+	public struct BatchPolygon
 	{
-		public Vertex[] vertices;
+		public uint    startVertexIndex;  // sizeof(uint) = 4
+		public uint    endVertexIndex;    // sizeof(uint) = 4
+		public uint    numVertices;       // sizeof(uint) = 4
+		public Vector3 planePosition;     // 3 * sizeof(float) = 12
+		public Vector3 planeNormal;       // 3 * sizeof(float) = 12
+		public Vector3 planeTangent;      // 3 * sizeof(float) = 12
+		public Vector3 planeBitangent;    // 3 * sizeof(float) = 12
 
-		public int Length { get { return vertices.Length; } }
-
-		public VertexBuffer() 
-		{ 
-			vertices = new Vertex[0]; 
-		}
-
-		public VertexBuffer(int bufferSize) 
-		{
-			vertices = new Vertex[bufferSize];
-		}
-
-		public void Resize(int newBufferSize)
-		{
-			System.Array.Resize<Vertex>( ref vertices, newBufferSize );
-		}
+		public const int SizeOf = 60; // ComputeShader stride
 	};
 
 	public struct PixelCoords
@@ -232,49 +238,48 @@ public partial class IrradianceTransfer : MonoBehaviour
 	#endregion
 
 	#region PrivateFields
-	Transform                _thisTransform = null;
-	Vector3                  _prevTransformFingerprint = new Vector3( float.MaxValue, float.MaxValue, float.MaxValue );
-	float                    _prevIntensity = float.MaxValue;
-	Vector2                  _irradianceMapBufferResolution = Vector2.zero;
-	Vector2                  _irradianceMapInvBufferResolution = Vector2.zero;
-	Vector4                  _irradianceMapPixelSize = Vector4.zero;
-	MeshAreaLight            _meshAreaLight;
-	Shader                   _albedoBufferShader;
-	Shader                   _depthBufferShader;
-	Shader                   _normalBufferShader;
-	Shader                   _geometryBufferShader;
-	Shader                   _mergeBufferShader;
-	Shader                   _illuminationBufferShader;
-	Material                 _mergeBufferMaterial;
-	Camera                   _offscreenCamera;
-	RenderTexture            _albedoBuffer;
-	RenderTexture            _depthBuffer;
-	RenderTexture            _normalBuffer;
-	RenderTexture            _mergeBuffer;
-	RenderTexture            _geometryBuffer;
-	RenderTexture            _illuminationBuffer;
-	Texture2D                _transferBuffer;
-	Color32[]                _albedoBufferPixels = new Color32[0];
-	Color32[]                _depthBufferPixels = new Color32[0];
-	Color32[]                _mergeBufferPixels = new Color32[0];
-	Color32[]                _illuminationBufferPixels = new Color32[0];
-	int                      _numPolygons = 0;
-	int[]                    _polygonMap = new int[0];
-	int[]                    _polygonMergeMap = new int[0];
-	int[]                    _polygonSize = new int[0];
-	IrradiancePolygon[]      _irradiancePolygons = new IrradiancePolygon[0];
-	byte[]                   _contourMap = new byte[0];
-	private ComputeBuffer    _polygonMapBuffer = null;
-	private ComputeBuffer    _contourBuffer = null;
-	private uint[]           _packedContourMap = new uint[0];
-	private ComputeBuffer    _inVertexBuffer = null;
-	private ComputeBuffer    _outVertexBuffer = null;
-	private ComputeBuffer    _polygonPlaneBuffer = null;
-	private VertexBuffer     _readWriteVertexBuffer = new VertexBuffer();
-	private PolygonPlane[]   _polygonPlanes = new PolygonPlane[0];
-	private ComputeShader    _computeShader = null;
-	int                      _numBatchVertices = 0;
-	int                      _numBatchPolygons = 0;
+	Transform                 _thisTransform = null;
+	Vector3                   _prevTransformFingerprint = new Vector3( float.MaxValue, float.MaxValue, float.MaxValue );
+	float                     _prevIntensity = float.MaxValue;
+	Vector2                   _irradianceMapBufferResolution = Vector2.zero;
+	Vector2                   _irradianceMapInvBufferResolution = Vector2.zero;
+	Vector4                   _irradianceMapPixelSize = Vector4.zero;
+	MeshAreaLight             _meshAreaLight;
+	Shader                    _albedoBufferShader;
+	Shader                    _depthBufferShader;
+	Shader                    _normalBufferShader;
+	Shader                    _geometryBufferShader;
+	Shader                    _mergeBufferShader;
+	Shader                    _illuminationBufferShader;
+	Material                  _mergeBufferMaterial;
+	Camera                    _offscreenCamera;
+	RenderTexture             _albedoBuffer;
+	RenderTexture             _depthBuffer;
+	RenderTexture             _normalBuffer;
+	RenderTexture             _mergeBuffer;
+	RenderTexture             _geometryBuffer;
+	RenderTexture             _illuminationBuffer;
+	Texture2D                 _transferBuffer;
+	Color32[]                 _albedoBufferPixels = new Color32[0];
+	Color32[]                 _depthBufferPixels = new Color32[0];
+	Color32[]                 _mergeBufferPixels = new Color32[0];
+	Color32[]                 _illuminationBufferPixels = new Color32[0];
+	int                       _numPolygons = 0;
+	int[]                     _polygonMap = new int[0];
+	int[]                     _polygonMergeMap = new int[0];
+	int[]                     _polygonSize = new int[0];
+	IrradiancePolygon[]       _irradiancePolygons = new IrradiancePolygon[0];
+	byte[]                    _contourMap = new byte[0];
+	ArrayBuffer<BatchVertex>  _batchVertices = new ArrayBuffer<BatchVertex>( GPUGroupSize );
+	ArrayBuffer<BatchPolygon> _batchPolygons = new ArrayBuffer<BatchPolygon>( GPUGroupSize );
+	private ComputeBuffer     _polygonMapBuffer = null;
+	private ComputeBuffer     _contourBuffer = null;
+	private uint[]            _packedContourMap = new uint[0];
+	private ComputeBuffer     _batchVertexBuffer = null;
+	private ComputeBuffer     _batchPolygonBuffer = null;
+	private ComputeShader     _computeShader = null;
+	int                       _numBatchVertices = 0;
+	int                       _numBatchPolygons = 0;
 	#endregion
 
 	#region MarchingSquares
@@ -308,21 +313,19 @@ public partial class IrradianceTransfer : MonoBehaviour
 
 	void OnDestroy()
 	{
-		_polygonMapBuffer.Release();
-		_contourBuffer.Release();
+		System.Action<ComputeBuffer> SafeReleaseBuffer = (computeBuffer) =>
+		{
+			if( computeBuffer != null )
+			{
+				computeBuffer.Release();
+			}
+		};
 
-		if( _inVertexBuffer != null )
-		{
-			_inVertexBuffer.Release();
-		}
-		if( _outVertexBuffer != null )
-		{
-			_outVertexBuffer.Release();
-		}
-		if( _polygonPlaneBuffer != null )
-		{
-			_polygonPlaneBuffer.Release();
-		}
+		SafeReleaseBuffer( _polygonMapBuffer );
+		SafeReleaseBuffer( _contourBuffer );
+
+		SafeReleaseBuffer( _batchVertexBuffer );
+		SafeReleaseBuffer( _batchPolygonBuffer );
 
 		for( int i=0; i<_irradiancePolygons.Length; i++ )
 		{
@@ -390,8 +393,6 @@ public partial class IrradianceTransfer : MonoBehaviour
 			_polygonMapBuffer = new ComputeBuffer( bufferWidth * bufferHeight, sizeof(int) );
 			_contourBuffer = new ComputeBuffer( (bufferWidth-1) * (bufferHeight-1), sizeof(uint) );
 			_packedContourMap = new uint[(bufferWidth-1)*(bufferHeight-1)];
-			_readWriteVertexBuffer = new VertexBuffer( GPUGroupSize );
-			_polygonPlanes = new PolygonPlane[32];
 			_computeShader = Resources.Load<ComputeShader>( "Shaders/PAL" );
 		}
 
@@ -401,6 +402,18 @@ public partial class IrradianceTransfer : MonoBehaviour
 		MergeBuffer = _mergeBuffer;
 		GeometryBuffer = _geometryBuffer;
 		IlluminationBuffer = _illuminationBuffer;
+	}
+
+	void OnDisable()
+	{
+		for( int i=0; i<_irradiancePolygons.Length; i++ )
+		{
+			if( _irradiancePolygons[i] != null )
+			{
+				PALBatchBuilder.UnregisterPolygonalAreaLight( _irradiancePolygons[i] );
+			}
+			_irradiancePolygons[i] = null;
+		}
 	}
 
 	void Update()
@@ -500,6 +513,12 @@ public partial class IrradianceTransfer : MonoBehaviour
 			irradiancePolygon.Circumcircle.Set( irradiancePolygon.Centroid.x, irradiancePolygon.Centroid.y, irradiancePolygon.Centroid.z, circumradius );
 
 			PALBatchBuilder.RegisterPolygonalAreaLight( irradiancePolygon );
+		}
+
+		for( int polygonIndex=0; polygonIndex<_irradiancePolygons.Length; polygonIndex++ )
+		{
+			var irradiancePolygon = _irradiancePolygons[polygonIndex];
+			if( irradiancePolygon == null ) continue;
 			PALBatchBuilder.Update( irradiancePolygon );
 		}
 	}

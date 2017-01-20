@@ -21,11 +21,12 @@
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-#define SHOW_POLYGON_PROCESSING_PASSES
-#undef SHOW_POLYGON_PROCESSING_PASSES
-
-#define SHOW_VERTEX_LABELS
-#undef SHOW_VERTEX_LABELS
+#if UNITY_EDITOR
+	#define SHOW_POLYGON_PROCESSING_PASSES
+	#undef SHOW_POLYGON_PROCESSING_PASSES
+	#define SHOW_VERTEX_LABELS
+	#undef SHOW_VERTEX_LABELS
+#endif
 
 using UnityEngine;
 using System.Collections;
@@ -34,88 +35,6 @@ using System.Collections.Generic;
 [RequireComponent(typeof(MeshAreaLight))]
 public partial class IrradianceTransfer : MonoBehaviour
 {
-	public class ArrayBuffer<T>
-	{
-		public T[] buffer;
-
-		public ArrayBuffer()
-		{
-			buffer = new T[0];
-		}
-
-		public ArrayBuffer(int size)
-		{
-			buffer = new T[size];
-		}
-
-		public void Resize(int newSize)
-		{
-			System.Array.Resize<T>( ref buffer, newSize );
-		}
-
-		public int Length
-		{
-			get { return buffer.Length; }
-		}
-
-		static public void Swap(ref ArrayBuffer<T> buffer0, ref ArrayBuffer<T> buffer1)
-		{
-			ArrayBuffer<T> temp = buffer0;
-			buffer0 = buffer1;
-			buffer1 = temp;
-		}
-	};
-
-	public struct Ajacency
-	{
-		public uint prevIndex; // sizeof(uint) = 4
-		public uint nextIndex; // sizeof(uint) = 4
-		public float prevEdgeLength; // sizeof(float) = 4
-		public float nextEdgeLength; // sizeof(float) = 4
-
-		public const int SizeOf = 16; // ComputeShader stride
-	};
-
-	public struct BatchPolygon
-	{
-		public uint  processed;               // sizeof(uint) = 4
-		public uint  startVertexIndex;        // sizeof(uint) = 4
-		public uint  endVertexIndex;          // sizeof(uint) = 4
-		public uint  numVertices;             // sizeof(uint) = 4
-		public float polygonArea;             // sizeof(float) = 4
-		public float averageTripletArea;      // sizeof(float) = 4
-		public float lowerAverageTripletArea; // sizeof(float) = 4
-		public float upperAverageTripletArea; // sizeof(float) = 4
-		public float averageEdgeLength;       // sizeof(float) = 4
-		public float lowerAverageEdgeLength;  // sizeof(float) = 4
-		public float upperAverageEdgeLength;  // sizeof(float) = 4
-		public uint  maxEdgeStartVertex;      // sizeof(uint) = 4
-		public uint  maxEdgeEndVertex;        // sizeof(uint) = 4
-
-		public const int SizeOf = 48; // ComputeShader stride
-	};
-
-	ArrayBuffer<Vector2> _inVertexPositions = new ArrayBuffer<Vector2>( GPUGroupSize );
-	ArrayBuffer<Vector2> _outVertexPositions = new ArrayBuffer<Vector2>( GPUGroupSize );
-
-	ArrayBuffer<uint> _inVertexFlags = new ArrayBuffer<uint>( GPUGroupSize );
-	ArrayBuffer<uint> _outVertexFlags = new ArrayBuffer<uint>( GPUGroupSize );
-
-	ArrayBuffer<uint> _inTripletFlags = new ArrayBuffer<uint>( GPUGroupSize );
-	ArrayBuffer<uint> _outTripletFlags = new ArrayBuffer<uint>( GPUGroupSize );
-
-	ArrayBuffer<Ajacency> _inVertexAjacency = new ArrayBuffer<Ajacency>( GPUGroupSize );
-	ArrayBuffer<Ajacency> _outVertexAjacency = new ArrayBuffer<Ajacency>( GPUGroupSize );
-
-	ArrayBuffer<float> _inTripletAreas = new ArrayBuffer<float>( GPUGroupSize );
-	ArrayBuffer<float> _outTripletAreas = new ArrayBuffer<float>( GPUGroupSize );
-
-	ArrayBuffer<uint> _inPolygonIndices = new ArrayBuffer<uint>( GPUGroupSize );
-
-	ArrayBuffer<BatchPolygon> _inBatchPolygons = new ArrayBuffer<BatchPolygon>( 16 );
-	ArrayBuffer<BatchPolygon> _outBatchPolygons = new ArrayBuffer<BatchPolygon>( 16 );
-	ArrayBuffer<uint> _outBatchPolygonSizes = new ArrayBuffer<uint>( 16 );
-
 	void MarchingSquaresCPU(PixelCoords marchingSquaresInf, PixelCoords marchingSquaresSup)
 	{
 		const byte Zero = 0;
@@ -232,9 +151,9 @@ public partial class IrradianceTransfer : MonoBehaviour
 			Vector3 w = Vector3.zero;
 			Vector3 worldSpaceVertexPos = Vector3.zero;
 			Vector3 worldSpaceVertexOffset = Vector3.zero;
-			float edgeLength;
 
-			// choose better point on polygon plane
+			// a) set "pointOnPolygonPlane" to center of polygon's bounding box in viewport space
+			// b) and project it on to plane of the polygon
 			{
 				viewPortSpaceVertexPos.x = irradiancePolygon.marchingSquaresInf.x + ( irradiancePolygon.marchingSquaresSup.x - irradiancePolygon.marchingSquaresInf.x ) / 2;
 				viewPortSpaceVertexPos.y = irradiancePolygon.marchingSquaresInf.y + ( irradiancePolygon.marchingSquaresSup.y - irradiancePolygon.marchingSquaresInf.y ) / 2;
@@ -251,6 +170,8 @@ public partial class IrradianceTransfer : MonoBehaviour
 
 				irradiancePolygon.pointOnPolygonPlane = ( rayOrigin + rayDirection * distance );
 			}
+
+			byte[] prevPolygonContourValue = new byte[2] { 0, 0 };
 
 			while( move != Stop )
 			{
@@ -354,6 +275,22 @@ public partial class IrradianceTransfer : MonoBehaviour
 					move = Stop;
 				}
 
+				switch( currentPolygonContourValue )
+				{
+				case 3:
+				case 6:
+				case 9:
+				case 12:
+					if( currentPolygonContourValue == prevPolygonContourValue[1] && currentPolygonContourValue == prevPolygonContourValue[0] ) 
+					{
+						_numBatchVertices--;
+						numPolygonVertices--;
+					}
+					break;
+				default:
+					break;
+				}
+
 				viewPortSpaceVertexPos.x *= _irradianceMapInvBufferResolution.x;
 				viewPortSpaceVertexPos.y *= _irradianceMapInvBufferResolution.y;
 
@@ -369,88 +306,52 @@ public partial class IrradianceTransfer : MonoBehaviour
 				worldSpaceVertexPos = ( rayOrigin + rayDirection * distance );
 				worldSpaceVertexOffset = worldSpaceVertexPos - irradiancePolygon.pointOnPolygonPlane;
 
-				_inVertexPositions.buffer[_numBatchVertices].Set( Vector3.Dot( worldSpaceVertexOffset, irradiancePolygon.polygonPlaneTangent ), Vector3.Dot( worldSpaceVertexOffset, irradiancePolygon.polygonPlaneBitangent ) );
-				_inVertexFlags.buffer[_numBatchVertices] = 1;
-				_inTripletFlags.buffer[_numBatchVertices] = 1;
-				_inVertexAjacency.buffer[_numBatchVertices].prevIndex = (uint)( ( numPolygonVertices > 0 ) ? ( _numBatchVertices - 1 ) : ( _numBatchVertices ) );
-				_inVertexAjacency.buffer[_numBatchVertices].nextIndex = (uint)( _numBatchVertices + 1 );
-				_inTripletAreas.buffer[_numBatchVertices] = 0.0f;
-				_inPolygonIndices.buffer[_numBatchVertices] = (uint)( _numBatchPolygons );
-
-				edgeLength = Vector2.Distance( _inVertexPositions.buffer[_numBatchVertices], _inVertexPositions.buffer[_inVertexAjacency.buffer[_numBatchVertices].prevIndex] );
-				_inVertexAjacency.buffer[_numBatchVertices].prevEdgeLength = edgeLength ;
-				_inVertexAjacency.buffer[_inVertexAjacency.buffer[_numBatchVertices].prevIndex].nextEdgeLength = edgeLength;
+				_batchVertices.buffer[_numBatchVertices].flag = 0;
+				_batchVertices.buffer[_numBatchVertices].prevIndex = (uint)(_numBatchVertices) - 1;
+				_batchVertices.buffer[_numBatchVertices].nextIndex = (uint)(_numBatchVertices) + 1;
+				_batchVertices.buffer[_numBatchVertices].position.Set( Vector3.Dot( worldSpaceVertexOffset, irradiancePolygon.polygonPlaneTangent ), Vector3.Dot( worldSpaceVertexOffset, irradiancePolygon.polygonPlaneBitangent ) );
+				_batchVertices.buffer[_numBatchVertices].edge.Set( 0,0 );
+				_batchVertices.buffer[_numBatchVertices].edgeLength = 0.0f;
+				_batchVertices.buffer[_numBatchVertices].tripletArea = 0.0f;
 
 				_numBatchVertices++;
 				numPolygonVertices++;
 
-				if( _numBatchVertices >= _inVertexPositions.Length )
+				if( _numBatchVertices >= _batchVertices.Length )
 				{
-					int newSize = _numBatchVertices + GPUGroupSize;
-					_inVertexPositions.Resize( newSize );
-					_inVertexFlags.Resize( newSize );
-					_inTripletFlags.Resize( newSize );
-					_inVertexAjacency.Resize( newSize );
-					_inTripletAreas.Resize( newSize );
-					_inPolygonIndices.Resize( newSize );
+					_batchVertices.Resize( _numBatchVertices + GPUGroupSize );
 				}
+
+				prevPolygonContourValue[0] = prevPolygonContourValue[1];
+				prevPolygonContourValue[1] = currentPolygonContourValue;
 			}
 
-			irradiancePolygon.Vertices = new Vector3[numPolygonVertices];
+			// loop ajacency data
 
-			// loop ajacency
+			uint startVertexIndex = (uint)( irradiancePolygon.BatchIndex );
+			uint endVertexIndex = (uint)( _numBatchVertices-1 );
 
-			_inVertexAjacency.buffer[irradiancePolygon.BatchIndex].prevIndex = (uint)( _numBatchVertices-1 );
-			_inVertexAjacency.buffer[_numBatchVertices-1].nextIndex = (uint)( irradiancePolygon.BatchIndex );
-
-			edgeLength = Vector2.Distance( _inVertexPositions.buffer[irradiancePolygon.BatchIndex], _inVertexPositions.buffer[_numBatchVertices-1] );
-			_inVertexAjacency.buffer[irradiancePolygon.BatchIndex].prevEdgeLength = edgeLength;
-			_inVertexAjacency.buffer[_numBatchVertices-1].nextEdgeLength = edgeLength;
+			_batchVertices.buffer[startVertexIndex].prevIndex = endVertexIndex;
+			_batchVertices.buffer[endVertexIndex].nextIndex = startVertexIndex;
 
 			// fill batch polygon
 
-			_inBatchPolygons.buffer[_numBatchPolygons].processed = 0;
-			_inBatchPolygons.buffer[_numBatchPolygons].startVertexIndex = (uint)( irradiancePolygon.BatchIndex );
-			_inBatchPolygons.buffer[_numBatchPolygons].endVertexIndex = (uint)( _numBatchVertices-1 );
-			_inBatchPolygons.buffer[_numBatchPolygons].numVertices = (uint)( numPolygonVertices );
-			_inBatchPolygons.buffer[_numBatchPolygons].polygonArea = 0.0f;
-			_inBatchPolygons.buffer[_numBatchPolygons].averageTripletArea = 0.0f;
-			_inBatchPolygons.buffer[_numBatchPolygons].lowerAverageTripletArea = 0.0f;
-			_inBatchPolygons.buffer[_numBatchPolygons].upperAverageTripletArea = 0.0f;
-			_inBatchPolygons.buffer[_numBatchPolygons].averageEdgeLength = 0.0f;
-			_inBatchPolygons.buffer[_numBatchPolygons].lowerAverageEdgeLength = 0.0f;
-			_inBatchPolygons.buffer[_numBatchPolygons].upperAverageEdgeLength = 0.0f;
-			_inBatchPolygons.buffer[_numBatchPolygons].maxEdgeStartVertex = uint.MaxValue;
-			_inBatchPolygons.buffer[_numBatchPolygons].maxEdgeEndVertex = uint.MaxValue;
+			_batchPolygons.buffer[_numBatchPolygons].startVertexIndex = startVertexIndex;
+			_batchPolygons.buffer[_numBatchPolygons].endVertexIndex = endVertexIndex;
+			_batchPolygons.buffer[_numBatchPolygons].numVertices = (uint)( numPolygonVertices );
+			_batchPolygons.buffer[_numBatchPolygons].planePosition = irradiancePolygon.pointOnPolygonPlane;
+			_batchPolygons.buffer[_numBatchPolygons].planeNormal = irradiancePolygon.polygonPlaneNormal;
+			_batchPolygons.buffer[_numBatchPolygons].planeTangent = irradiancePolygon.polygonPlaneTangent;
+			_batchPolygons.buffer[_numBatchPolygons].planeBitangent = irradiancePolygon.polygonPlaneBitangent;
 
 			_numBatchPolygons++;
 
 			numPolygonVertices = 0;
 
-			if( _numBatchPolygons >= _inBatchPolygons.Length )
+			if( _numBatchPolygons >= _batchPolygons.Length )
 			{
-				_inBatchPolygons.Resize( _inBatchPolygons.Length * 2 );
+				_batchPolygons.Resize( _batchPolygons.Length + GPUGroupSize );
 			}
-		}
-
-		if( _outVertexPositions.Length != _inVertexPositions.Length )
-		{
-			int newSize = _inVertexPositions.Length;
-			_outVertexPositions.Resize( newSize );
-			_outVertexFlags.Resize( newSize );
-			_outTripletFlags.Resize( newSize );
-			_outVertexAjacency.Resize( newSize );
-			_outTripletAreas.Resize( newSize );
-		}
-
-		if( _outBatchPolygons.Length != _inBatchPolygons.Length )
-		{
-			_outBatchPolygons.Resize( _inBatchPolygons.Length );
-		}
-
-		if( _outBatchPolygonSizes.Length != _inBatchPolygons.Length )
-		{
-			_outBatchPolygonSizes.Resize( _inBatchPolygons.Length );
 		}
 
 		ProcessPolygonsCPU();
@@ -502,84 +403,20 @@ public partial class IrradianceTransfer : MonoBehaviour
 
 	void ProcessPolygonsCPU()
 	{
-		uint prevNumTotalVertices = (uint)_numBatchVertices;
-
-		InitializeTriplets( ref _inVertexPositions.buffer, ref _inVertexAjacency.buffer, ref _outTripletAreas.buffer, _numBatchVertices );
-		ArrayBuffer<float>.Swap( ref _inTripletAreas, ref _outTripletAreas );
-
-		UpdateBatchPolygons( ref _inVertexPositions.buffer, ref _inTripletAreas.buffer, ref _inTripletFlags.buffer, ref _inVertexAjacency.buffer, ref _inVertexFlags.buffer, ref _inBatchPolygons.buffer, ref _outBatchPolygons.buffer, ref _outBatchPolygonSizes.buffer, 0, _numBatchPolygons );
-		ArrayBuffer<BatchPolygon>.Swap( ref _inBatchPolygons, ref _outBatchPolygons );
-
-		const int MaxSimplificationSteps = 128;
+		const int MaxPolygonProcessingPasses = 128;
+		const int MinPolygonsInSecondaryAreaLight = 5;
 
 		#if SHOW_POLYGON_PROCESSING_PASSES
-		if( _polygonProcessingPass >= 1 )
-		#endif
 		{
-			for( int simplificationStep=0; simplificationStep<MaxSimplificationSteps; simplificationStep++ )
-			{
-				SimplifyPolygons( ref _inPolygonIndices.buffer, ref _inBatchPolygons.buffer, ref _inVertexFlags.buffer, ref _inVertexAjacency.buffer, ref _inTripletAreas.buffer, ref _inTripletFlags.buffer, ref _outVertexFlags.buffer, ref _outTripletFlags.buffer, 1, _numBatchVertices );
-				ArrayBuffer<uint>.Swap( ref _inVertexFlags, ref _outVertexFlags );
-
-				// do not involve triplet flags in first step
-				if( simplificationStep > 1 )
-				{
-					ArrayBuffer<uint>.Swap( ref _inTripletFlags, ref _outTripletFlags );
-				}
-
-				/*if( simplificationStep <= 2 )
-				{
-					SmoothVertices( ref _inVertexPositions.buffer, ref _inVertexAjacency.buffer, ref _inPolygonIndices.buffer, ref _inBatchPolygons.buffer, ref _outVertexPositions.buffer, _numBatchVertices );
-					ArrayBuffer<Vector2>.Swap( ref _inVertexPositions, ref _outVertexPositions );
-				}*/
-
-				UpdateAjacencyAndTriplets( ref _inVertexPositions.buffer, ref _inVertexAjacency.buffer, ref _inVertexFlags.buffer, ref _inTripletAreas.buffer, ref _inTripletFlags.buffer, ref _inPolygonIndices.buffer, ref _inBatchPolygons.buffer, ref _outVertexAjacency.buffer, ref _outTripletAreas.buffer, ref _outTripletFlags.buffer, _numBatchVertices );
-				ArrayBuffer<Ajacency>.Swap( ref _inVertexAjacency, ref _outVertexAjacency );
-				ArrayBuffer<float>.Swap( ref _inTripletAreas, ref _outTripletAreas );
-				ArrayBuffer<uint>.Swap( ref _inTripletFlags, ref _outTripletFlags );
-
-				UpdateBatchPolygons( ref _inVertexPositions.buffer, ref _inTripletAreas.buffer, ref _inTripletFlags.buffer, ref _inVertexAjacency.buffer, ref _inVertexFlags.buffer, ref _inBatchPolygons.buffer, ref _outBatchPolygons.buffer, ref _outBatchPolygonSizes.buffer, simplificationStep+1, _numBatchPolygons );
-				ArrayBuffer<BatchPolygon>.Swap( ref _inBatchPolygons, ref _outBatchPolygons );
-
-				#if SHOW_POLYGON_PROCESSING_PASSES
-				if( 1 + simplificationStep > _polygonProcessingPass )
-				{
-					break;
-				}
-				#endif
-
-				#if !SHOW_POLYGON_PROCESSING_PASSES
-				{
-					uint totalVertices = 0;
-					for( uint i=0; i<_numBatchPolygons; i++ )
-					{
-						totalVertices += _outBatchPolygonSizes.buffer[i];
-					}
-					if( totalVertices < prevNumTotalVertices )
-					{
-						prevNumTotalVertices = totalVertices;
-					}
-					else
-					{
-						break;
-					}
-				}
-				#endif
-			}
-		}
-
-		#if SHOW_POLYGON_PROCESSING_PASSES
+			ProcessPolygons( ref _batchVertices.buffer, ref _batchPolygons.buffer, (uint)_numBatchVertices, (uint)_numBatchPolygons, (uint)(MinPolygonsInSecondaryAreaLight), (uint)(_polygonProcessingPass) );
 			_polygonProcessingPass++;
-			if( _polygonProcessingPass >= 1 + MaxSimplificationSteps ) _polygonProcessingPass = 0;
+			if( _polygonProcessingPass >= MaxPolygonProcessingPasses ) _polygonProcessingPass = 0;
+		}
+		#else
+		{			
+			ProcessPolygons( ref _batchVertices.buffer, ref _batchPolygons.buffer, (uint)_numBatchVertices, (uint)_numBatchPolygons, (uint)(MinPolygonsInSecondaryAreaLight), (uint)MaxPolygonProcessingPasses );
+		}
 		#endif
-
-		// get data 
-
-		ArrayBuffer<Vector2>.Swap( ref _inVertexPositions, ref _outVertexPositions );
-		ArrayBuffer<uint>.Swap( ref _inVertexFlags, ref _outVertexFlags );
-		ArrayBuffer<uint>.Swap( ref _inTripletFlags, ref _outTripletFlags );
-		ArrayBuffer<Ajacency>.Swap( ref _inVertexAjacency, ref _outVertexAjacency );
-		ArrayBuffer<float>.Swap( ref _inTripletAreas, ref _outTripletAreas );
 
 		#if SHOW_VERTEX_LABELS
 			_vertexLabels.Clear();
@@ -595,518 +432,422 @@ public partial class IrradianceTransfer : MonoBehaviour
 			IrradiancePolygon irradiancePolygon = _irradiancePolygons[i];
 			if( irradiancePolygon == null ) continue;
 
-			int numPolygonVertices = irradiancePolygon.Vertices.Length;
-			int numReducedVertices = 0;
-			int startVertex = irradiancePolygon.BatchIndex;
-
-			#if SHOW_VERTEX_LABELS
-			Vector3 polygonLabelPosition = Vector3.zero;
-			#endif
+			int vertexIndex = (int)( _batchPolygons.buffer[batchPolygonIndex].startVertexIndex );
+			int numPolygonVertices = (int)( _batchPolygons.buffer[batchPolygonIndex].numVertices );
+			irradiancePolygon.Vertices = new Vector3[numPolygonVertices];
 
 			for( int j=0; j<numPolygonVertices; j++ )
 			{
-				if( _outVertexFlags.buffer[startVertex+j] == 1 )
-				{
-					irradiancePolygon.Vertices[numReducedVertices] = 
-					(
-						irradiancePolygon.pointOnPolygonPlane +
-						_outVertexPositions.buffer[startVertex+j].x * irradiancePolygon.polygonPlaneTangent +
-						_outVertexPositions.buffer[startVertex+j].y * irradiancePolygon.polygonPlaneBitangent
-					);
+				irradiancePolygon.Vertices[j] = 
+				(
+					irradiancePolygon.pointOnPolygonPlane +					
+						_batchVertices.buffer[vertexIndex].position.x * irradiancePolygon.polygonPlaneTangent +
+						_batchVertices.buffer[vertexIndex].position.y * irradiancePolygon.polygonPlaneBitangent
+				);
 
-					#if SHOW_VERTEX_LABELS
-					{						
-						string label = j.ToString();
-						_vertexLabels.Add( new KeyValuePair<Vector3,string>( irradiancePolygon.Vertices[numReducedVertices], label ) );
-						polygonLabelPosition += irradiancePolygon.Vertices[numReducedVertices];
-					}
-					#endif
-
-					#if SHOW_POLYGON_PROCESSING_PASSES
-					{
-						if( _outTripletFlags.buffer[startVertex+j] == 0 )
-						{
-							_tripletColors.Add( new KeyValuePair<Vector3,Color>( irradiancePolygon.Vertices[numReducedVertices], Color.red ) );
-						}
-					}
-					#endif
-
-					numReducedVertices++;
+				#if SHOW_VERTEX_LABELS
+				{						
+					string label = vertexIndex.ToString();
+					label += "\n" + _batchVertices.buffer[vertexIndex].edgeLength.ToString("F4");
+					label += "\n" + _batchVertices.buffer[vertexIndex].tripletArea.ToString("F4");
+					_vertexLabels.Add( new KeyValuePair<Vector3,string>( irradiancePolygon.Vertices[j], label ) );
 				}
-			}
+				#endif
 
-			#if SHOW_VERTEX_LABELS
-			{
-				polygonLabelPosition *= 1.0f / numReducedVertices;
-				string label = batchPolygonIndex.ToString() + " : " + numReducedVertices.ToString() + "\n" + _inBatchPolygons.buffer[batchPolygonIndex].polygonArea.ToString( "F5" ) + "\n" + _inBatchPolygons.buffer[batchPolygonIndex].lowerAverageTripletArea.ToString( "F5" ) + " / " + _inBatchPolygons.buffer[batchPolygonIndex].averageTripletArea.ToString( "F5" ) + " / " + _inBatchPolygons.buffer[batchPolygonIndex].upperAverageTripletArea.ToString( "F5" );
-				_vertexLabels.Add( new KeyValuePair<Vector3,string>( polygonLabelPosition, label ) );
-			}
-			#endif
-
-			if( numReducedVertices < numPolygonVertices )
-			{
-				System.Array.Resize<Vector3>( ref irradiancePolygon.Vertices, numReducedVertices );
+				vertexIndex = (int)( _batchVertices.buffer[vertexIndex].nextIndex );
 			}
 
 			batchPolygonIndex++;
 		}
 	}
 
-	static void SmoothVertices(ref Vector2[] inVertexPositionBuffer, ref Ajacency[] inAjacencyBuffer, ref uint[] inPolygonIndexBuffer, ref BatchPolygon[] inBatchPolygonBuffer, ref Vector2[] outVertexPositionBuffer, int numBatchVertices)
+	static float TripletArea(Vector2 v1, Vector2 v2, Vector2 v3)
 	{
-		for( uint index=0; index<numBatchVertices; index++ )
+		return Mathf.Abs( 0.5f * ( -v2.x*v1.y + v3.x*v1.y + v1.x*v2.y - v3.x*v2.y - v1.x*v3.y + v2.x*v3.y ) );
+	}
+
+	static float ClockwiseAngle (Vector2 v1, Vector2 v2)
+	{
+		float result = Mathf.Atan2( v1.x*v2.y - v1.y*v2.x, v1.x*v2.x + v1.y*v2.y );
+		if( result > 0 )
 		{
-			uint prevIndex = inAjacencyBuffer[index].prevIndex;
-			uint nextIndex = inAjacencyBuffer[index].nextIndex;
-			outVertexPositionBuffer[index] = ( inVertexPositionBuffer[prevIndex]  + inVertexPositionBuffer[index] + inVertexPositionBuffer[nextIndex] ) / 3;
+			result = -( Mathf.PI * 2 - result );
 		}
+		return -result;
 	}
 
-	static float TriangleArea(Vector2 v1, Vector2 v2, Vector2 v3)
+	static void RemoveVertex(ref BatchVertex[] batchVertexBuffer, ref BatchPolygon[] batchPolygonBuffer, uint polygonIndex, uint vertexIndex, bool updateEdge, bool updateTriplets)
 	{
-		float a = Vector2.Distance( v1, v2 );
-		float b = Vector2.Distance( v2, v3 );
-		float c = Vector2.Distance( v3, v1 );
-		float sum = (a+b+c)*(b+c-a)*(c+a-b)*(a+b-c);
-		return 0.25f * Mathf.Sqrt( ( sum > 0 ) ? ( sum ) : ( 0 ) );
-	}
-
-	static void InitializeTriplets(ref Vector2[] inVertexPositionBuffer, ref Ajacency[] inAjacencyBuffer, ref float[] outTripletAreaBuffer, int numBatchVertices)
-	{
-		for( uint index=0; index<numBatchVertices; index++ )
+		if( batchPolygonBuffer[polygonIndex].startVertexIndex > vertexIndex )
 		{
-			uint prevIndex = inAjacencyBuffer[index].prevIndex;
-			uint nextIndex = inAjacencyBuffer[index].nextIndex;
-			outTripletAreaBuffer[index] = TriangleArea( inVertexPositionBuffer[prevIndex], inVertexPositionBuffer[index], inVertexPositionBuffer[nextIndex] );
+			Debug.LogAssertion( "[IrradianceTransferCPU] RemoveVertex() : ( batchPolygonBuffer[polygonIndex].startVertexIndex > vertexIndex )" );
+			return;
 		}
+
+		if( batchPolygonBuffer[polygonIndex].endVertexIndex < vertexIndex )
+		{
+			Debug.LogAssertion( "[IrradianceTransferCPU] RemoveVertex() : ( batchPolygonBuffer[polygonIndex].endVertexIndex < vertexIndex )" );
+			return;
+		}
+
+		if( batchPolygonBuffer[polygonIndex].numVertices == 0 )
+		{
+			Debug.LogAssertion( "[IrradianceTransferCPU] RemoveVertex() : ( batchPolygonBuffer[polygonIndex].numVertices == 0 )" );
+			return;
+		}
+
+		// update ajacency
+
+		uint prevIndex = batchVertexBuffer[vertexIndex].prevIndex;
+		uint nextIndex = batchVertexBuffer[vertexIndex].nextIndex;
+
+		batchVertexBuffer[prevIndex].nextIndex = nextIndex;
+		batchVertexBuffer[nextIndex].prevIndex = prevIndex;
+
+		// update edge
+
+		if( updateEdge )
+		{
+			Vector2 prevEdge = ( batchVertexBuffer[nextIndex].position - batchVertexBuffer[prevIndex].position );
+			float prevEdgeLength = prevEdge.magnitude;
+			prevEdge *= 1.0f / prevEdge.magnitude;
+
+			batchVertexBuffer[prevIndex].edge = prevEdge;
+			batchVertexBuffer[prevIndex].edgeLength = prevEdgeLength;
+		}
+
+		// update triplets
+
+		if( updateTriplets )
+		{
+			batchVertexBuffer[prevIndex].tripletArea = TripletArea( 
+				batchVertexBuffer[batchVertexBuffer[prevIndex].prevIndex].position,
+				batchVertexBuffer[prevIndex].position,
+				batchVertexBuffer[nextIndex].position
+			);
+
+			batchVertexBuffer[nextIndex].tripletArea = TripletArea( 
+				batchVertexBuffer[prevIndex].position,
+				batchVertexBuffer[nextIndex].position,
+				batchVertexBuffer[batchVertexBuffer[nextIndex].nextIndex].position
+			);
+		}
+
+		// update polygon
+
+		if( vertexIndex == batchPolygonBuffer[polygonIndex].startVertexIndex )
+		{
+			batchPolygonBuffer[polygonIndex].startVertexIndex = nextIndex;
+		}
+		else if( vertexIndex == batchPolygonBuffer[polygonIndex].endVertexIndex )
+		{
+			batchPolygonBuffer[polygonIndex].endVertexIndex = prevIndex;
+		}
+
+		batchPolygonBuffer[polygonIndex].numVertices--;
 	}
 
-	static void SimplifyPolygons(ref uint[] inPolygonIndexBuffer, ref BatchPolygon[] inBatchPolygonBuffer, ref uint[] inVertexFlagBuffer, ref Ajacency[] inVertexAjacencyBuffer, ref float[] inTripletAreaBuffer, ref uint[] inTripletFlagBuffer, ref uint[] outVertexFlagBuffer, ref uint[] outTripletFlagBuffer, int maxAjacencyDistance, int numBatchVertices)
+	static void InitializeEdges(ref BatchVertex[] batchVertexBuffer, ref BatchPolygon[] batchPolygonBuffer, uint polygonIndex)
 	{
-		for( uint index=0; index<numBatchVertices; index++ )
+		uint currIndex;
+		uint nextIndex;
+
+		currIndex = batchPolygonBuffer[polygonIndex].startVertexIndex;
+		nextIndex = batchVertexBuffer[currIndex].nextIndex;
+
+		do
 		{
-			uint batchPolygonIndex = inPolygonIndexBuffer[index];
+			Vector2 edge = ( batchVertexBuffer[nextIndex].position - batchVertexBuffer[currIndex].position );
+			float edgeLength = edge.magnitude;
+			edge *= 1.0f / edgeLength;
 
-			if( inBatchPolygonBuffer[batchPolygonIndex].processed == 1 )
+			batchVertexBuffer[currIndex].edge = edge;
+			batchVertexBuffer[currIndex].edgeLength = edgeLength;
+
+			currIndex = nextIndex;
+			nextIndex = batchVertexBuffer[currIndex].nextIndex;
+		}
+		while( currIndex != batchPolygonBuffer[polygonIndex].startVertexIndex );
+	}
+
+	static void InitializeTriplets(ref BatchVertex[] batchVertexBuffer, ref BatchPolygon[] batchPolygonBuffer, uint polygonIndex)
+	{
+		uint prevIndex;
+		uint currIndex;
+		uint nextIndex;
+
+		currIndex = batchPolygonBuffer[polygonIndex].startVertexIndex;
+		prevIndex = batchVertexBuffer[currIndex].prevIndex;
+		nextIndex = batchVertexBuffer[currIndex].nextIndex;
+
+		do
+		{
+			batchVertexBuffer[currIndex].tripletArea = TripletArea( 
+				batchVertexBuffer[prevIndex].position, 
+				batchVertexBuffer[currIndex].position, 
+				batchVertexBuffer[nextIndex].position
+			);
+
+			prevIndex = currIndex;
+			currIndex = nextIndex;
+			nextIndex = batchVertexBuffer[currIndex].nextIndex;
+		}
+		while( currIndex != batchPolygonBuffer[polygonIndex].startVertexIndex );
+	}
+
+	static void RemoveRedundantEdges(ref BatchVertex[] batchVertexBuffer, ref BatchPolygon[] batchPolygonBuffer, uint polygonIndex, float edgeAngleCosine)
+	{
+		uint currIndex = batchPolygonBuffer[polygonIndex].startVertexIndex;
+		uint prevIndex = batchVertexBuffer[currIndex].prevIndex;
+		uint nextIndex = batchVertexBuffer[currIndex].nextIndex;
+
+		do
+		{
+			Vector2 prevEdge = batchVertexBuffer[prevIndex].edge;
+			Vector2 nextEdge = batchVertexBuffer[currIndex].edge;
+
+			if( Vector2.Dot( prevEdge, nextEdge ) > edgeAngleCosine )
 			{
-				outVertexFlagBuffer[index] = inVertexFlagBuffer[index];
-				outTripletFlagBuffer[index] = inTripletFlagBuffer[index];
-				continue;
-			}
+				RemoveVertex( ref batchVertexBuffer, ref batchPolygonBuffer, polygonIndex, currIndex, true, false );
 
-			if( inVertexFlagBuffer[index] == 1 && inTripletFlagBuffer[index] == 1 )
-			{
-				float polygonArea = inBatchPolygonBuffer[batchPolygonIndex].polygonArea;
-				float lowerAverageTripletArea = inBatchPolygonBuffer[batchPolygonIndex].lowerAverageTripletArea;
-				float upperAverageTripletArea = inBatchPolygonBuffer[batchPolygonIndex].upperAverageTripletArea;
-				float upperAverageEdgeLength = inBatchPolygonBuffer[batchPolygonIndex].upperAverageEdgeLength;
-				uint numPolygonVertices = inBatchPolygonBuffer[batchPolygonIndex].numVertices;
-				uint maxEdgeStartVertex = inBatchPolygonBuffer[batchPolygonIndex].maxEdgeStartVertex;
-				uint maxEdgeEndVertex = inBatchPolygonBuffer[batchPolygonIndex].maxEdgeEndVertex;
-
-				//float maxReducibleTripletArea = 0.33f * polygonArea / numPolygonVertices; // TODO: move to Update()
-				float maxReducibleTripletArea = 0.01f * polygonArea;
-
-				float tripletArea = inTripletAreaBuffer[index];
-
-				if( tripletArea <= maxReducibleTripletArea && tripletArea <= lowerAverageTripletArea )
-				{
-					uint prevIndex = inVertexAjacencyBuffer[index].prevIndex;
-					uint nextIndex = inVertexAjacencyBuffer[index].nextIndex;
-
-					bool isSimplifiable = true;
-					for( uint ajacencyDistance=0; ajacencyDistance<(uint)(maxAjacencyDistance); ajacencyDistance++ )
-					{
-						if( inTripletFlagBuffer[prevIndex] == 1 )
-						{
-							float prevTripletArea = inTripletAreaBuffer[prevIndex];
-							if( tripletArea > prevTripletArea )
-							{
-								isSimplifiable = false;
-								break;
-							}
-						}
-
-						if( inTripletFlagBuffer[nextIndex] == 1 )
-						{
-							float nextTripletArea = inTripletAreaBuffer[nextIndex];
-							if( tripletArea > nextTripletArea )
-							{
-								isSimplifiable = false;
-								break;
-							}
-						}
-
-						prevIndex = inVertexAjacencyBuffer[prevIndex].prevIndex;
-						nextIndex = inVertexAjacencyBuffer[nextIndex].nextIndex;
-					}
-
-					if( isSimplifiable )
-					{
-						outVertexFlagBuffer[index] = 0;
-						outTripletFlagBuffer[index] = 0;
-					}
-					else
-					{
-						outVertexFlagBuffer[index] = 1;
-						outTripletFlagBuffer[index] = 1;
-					}
-				}
-				else if( index == maxEdgeStartVertex || index == maxEdgeEndVertex )
-				{
-					outVertexFlagBuffer[index] = 1;
-					outTripletFlagBuffer[index] = 0;
-				}
-				else 
-				{					
-					outVertexFlagBuffer[index] = 1;
-					outTripletFlagBuffer[index] = 1;
-				}
-			}
-			else if( inVertexFlagBuffer[index] == 1 && inTripletFlagBuffer[index] == 0 )
-			{
-				float upperAverageEdgeLength = inBatchPolygonBuffer[batchPolygonIndex].upperAverageEdgeLength;
-
-				if( inVertexAjacencyBuffer[index].prevEdgeLength < upperAverageEdgeLength &&
-					inVertexAjacencyBuffer[index].nextEdgeLength < upperAverageEdgeLength )
-				{
-					outVertexFlagBuffer[index] = 1;
-					outTripletFlagBuffer[index] = 1;
-				}
-				else
-				{
-					outVertexFlagBuffer[index] = 1;
-					outTripletFlagBuffer[index] = 0;
-				}
+				currIndex = nextIndex;
+				prevIndex = batchVertexBuffer[currIndex].prevIndex;
+				nextIndex = batchVertexBuffer[currIndex].nextIndex;
 			}
 			else
 			{
-				outVertexFlagBuffer[index] = 0;
-				outTripletFlagBuffer[index] = 0;
+				prevIndex = currIndex;
+				currIndex = nextIndex;
+				nextIndex = batchVertexBuffer[currIndex].nextIndex;
 			}
 		}
+		while( currIndex != batchPolygonBuffer[polygonIndex].startVertexIndex );
 	}
 
-	static void UpdateAjacencyAndTriplets(ref Vector2[] inVertexPositionBuffer, ref Ajacency[] inAjacencyBuffer, ref uint[] inFlagBuffer, ref float[] inTripletAreaBuffer, ref uint[] inTripletFlagBuffer, ref uint[] inPolygonIndexBuffer, ref BatchPolygon[] inBatchPolygonBuffer, ref Ajacency[] outAjacencyBuffer, ref float[] outTripletAreaBuffer, ref uint[] outTripletFlagBuffer, int numBatchVertices)
+	static void RemoveLocalConcavity(ref BatchVertex[] batchVertexBuffer, ref BatchPolygon[] batchPolygonBuffer, uint polygonIndex, uint concavityType)
 	{
-		for( uint index=0; index<numBatchVertices; index++ )
-		{
-			uint batchPolygonIndex = inPolygonIndexBuffer[index];
+		uint currIndex = batchPolygonBuffer[polygonIndex].startVertexIndex;
+		uint prevIndex = batchVertexBuffer[currIndex].prevIndex;
+		uint nextIndex = batchVertexBuffer[currIndex].nextIndex;
+		uint precIndex = batchVertexBuffer[prevIndex].prevIndex;
 
-			if( inBatchPolygonBuffer[batchPolygonIndex].processed == 1 )
+		do
+		{
+			Vector2 precEdge = -batchVertexBuffer[precIndex].edge; //( batchVertexBuffer[precIndex].position - batchVertexBuffer[prevIndex].position );
+			Vector2 prevEdge = batchVertexBuffer[prevIndex].edge; //( batchVertexBuffer[currIndex].position - batchVertexBuffer[prevIndex].position );
+			Vector2 virtualEdge = ( batchVertexBuffer[nextIndex].position - batchVertexBuffer[prevIndex].position );
+
+			float virtualEdgeLength = virtualEdge.magnitude;
+			virtualEdge *= 1.0f / virtualEdgeLength;
+
+			// cavity
+			if( ( concavityType == 0 ) && ( ClockwiseAngle( precEdge, prevEdge ) > ClockwiseAngle( precEdge, virtualEdge ) ) )
+			{				
+				batchVertexBuffer[currIndex].flag = 1;
+			}
+			// ledge
+			else if( ( concavityType == 1 ) && ( ClockwiseAngle( precEdge, prevEdge ) < ClockwiseAngle( precEdge, virtualEdge ) ) )
 			{
-				outAjacencyBuffer[index].nextEdgeLength = inAjacencyBuffer[index].nextEdgeLength;
-				outAjacencyBuffer[index].nextIndex = inAjacencyBuffer[index].nextIndex;
-				outAjacencyBuffer[index].prevEdgeLength = inAjacencyBuffer[index].prevEdgeLength;
-				outAjacencyBuffer[index].prevIndex = inAjacencyBuffer[index].prevIndex;
-				outTripletAreaBuffer[index] = inTripletAreaBuffer[index];
-				outTripletFlagBuffer[index] = inTripletFlagBuffer[index];
+				batchVertexBuffer[currIndex].flag = 1;
+			}
+
+			precIndex = prevIndex;
+			prevIndex = currIndex;
+			currIndex = nextIndex;
+			nextIndex = batchVertexBuffer[currIndex].nextIndex;
+		}
+		while( currIndex != batchPolygonBuffer[polygonIndex].startVertexIndex );
+
+		currIndex = batchPolygonBuffer[polygonIndex].startVertexIndex;
+		do
+		{
+			if( batchVertexBuffer[currIndex].flag == 1 )
+			{
+				uint indexToRemove = currIndex;
+				currIndex = batchVertexBuffer[currIndex].nextIndex;
+				RemoveVertex( ref batchVertexBuffer, ref batchPolygonBuffer, polygonIndex, indexToRemove, true, false );
 			}
 			else
 			{
-				if( inFlagBuffer[index] == 1 )
-				{
-					uint prevIndex = inAjacencyBuffer[index].prevIndex;
-					uint nextIndex = inAjacencyBuffer[index].nextIndex;
-
-					bool isTripletAreaOutOfDate = ( inFlagBuffer[prevIndex] == 0 ) || ( inFlagBuffer[nextIndex] == 0 );
-
-					if( isTripletAreaOutOfDate )
-					{
-						while( inFlagBuffer[prevIndex] != 1 && prevIndex != index ) 
-						{
-							prevIndex = inAjacencyBuffer[prevIndex].prevIndex;
-						}
-
-						while( inFlagBuffer[nextIndex] != 1 && nextIndex != index ) 
-						{
-							nextIndex = inAjacencyBuffer[nextIndex].nextIndex;
-						}
-
-						outAjacencyBuffer[index].prevIndex = prevIndex;
-						outAjacencyBuffer[index].nextIndex = nextIndex;
-						outAjacencyBuffer[index].prevEdgeLength = Vector2.Distance( inVertexPositionBuffer[prevIndex], inVertexPositionBuffer[index] );
-						outAjacencyBuffer[index].nextEdgeLength = Vector2.Distance( inVertexPositionBuffer[nextIndex], inVertexPositionBuffer[index] );
-						outTripletAreaBuffer[index] = TriangleArea( inVertexPositionBuffer[prevIndex], inVertexPositionBuffer[index], inVertexPositionBuffer[nextIndex] );
-						outTripletFlagBuffer[index] = inTripletFlagBuffer[index];
-					}
-					else
-					{
-						outAjacencyBuffer[index].prevIndex = inAjacencyBuffer[index].prevIndex;
-						outAjacencyBuffer[index].nextIndex = inAjacencyBuffer[index].nextIndex;
-						outAjacencyBuffer[index].prevEdgeLength = inAjacencyBuffer[index].prevEdgeLength;
-						outAjacencyBuffer[index].nextEdgeLength = inAjacencyBuffer[index].nextEdgeLength;
-						outTripletAreaBuffer[index] = inTripletAreaBuffer[index];
-						outTripletFlagBuffer[index] = inTripletFlagBuffer[index];
-					}
-				}
-				else
-				{
-					outAjacencyBuffer[index].prevIndex = inAjacencyBuffer[index].prevIndex;
-					outAjacencyBuffer[index].nextIndex = inAjacencyBuffer[index].nextIndex;
-					outAjacencyBuffer[index].prevEdgeLength = inAjacencyBuffer[index].prevEdgeLength;
-					outAjacencyBuffer[index].nextEdgeLength = inAjacencyBuffer[index].nextEdgeLength;
-					outTripletAreaBuffer[index] = inTripletAreaBuffer[index];
-					outTripletFlagBuffer[index] = inTripletFlagBuffer[index];
-				}
+				currIndex = batchVertexBuffer[currIndex].nextIndex;
 			}
+		}
+		while( currIndex != batchPolygonBuffer[polygonIndex].startVertexIndex );
+	}
+
+	static void GetPolygonTripletStatistics(ref BatchVertex[] batchVertexBuffer, ref BatchPolygon[] batchPolygonBuffer, uint polygonIndex, out float averageTripletArea, out float lowerAverageTripletArea, out float upperAverageTripletArea)
+	{
+		averageTripletArea = 0;
+		lowerAverageTripletArea = 0;
+		upperAverageTripletArea = 0;
+
+		uint startVertexIndex = batchPolygonBuffer[polygonIndex].startVertexIndex;
+
+		uint vertexIndex = startVertexIndex;
+		do
+		{
+			averageTripletArea += batchVertexBuffer[vertexIndex].tripletArea;
+			vertexIndex = batchVertexBuffer[vertexIndex].nextIndex;
+		}
+		while( vertexIndex != startVertexIndex );
+
+		if( batchPolygonBuffer[polygonIndex].numVertices > 0 )
+		{
+			averageTripletArea /= batchPolygonBuffer[polygonIndex].numVertices;
+		}
+
+		uint numLowerAverageTriplets = 0;
+		uint numUpperAverageTriplets = 0;
+		vertexIndex = startVertexIndex;
+		do
+		{
+			float tripletArea = batchVertexBuffer[vertexIndex].tripletArea;
+
+			if( tripletArea < averageTripletArea )
+			{
+				lowerAverageTripletArea += tripletArea;
+				numLowerAverageTriplets++;
+			}
+			else
+			{
+				upperAverageTripletArea += tripletArea;
+				numUpperAverageTriplets++;
+			}
+			vertexIndex = batchVertexBuffer[vertexIndex].nextIndex;
+		}
+		while( vertexIndex != startVertexIndex );
+
+		if( numLowerAverageTriplets > 0 )
+		{
+			lowerAverageTripletArea /= numLowerAverageTriplets;
+		}
+
+		if( numUpperAverageTriplets > 0 )
+		{
+			upperAverageTripletArea /= numUpperAverageTriplets;
 		}
 	}
 
-	static void UpdateBatchPolygons(ref Vector2[] inVertexPositionBuffer, ref float[] inTripletAreaBuffer, ref uint[] inTripletFlagBuffer, ref Ajacency[] inAjacencyBuffer, ref uint[] inFlagBuffer, ref BatchPolygon[] inBatchPolygonBuffer, ref BatchPolygon[] outBatchPolygonBuffer, ref uint[] outBatchPolygonSizeBuffer, int updateStep, int numBatchPolygons)
+	static void RemoveLesserTriplets(ref BatchVertex[] batchVertexBuffer, ref BatchPolygon[] batchPolygonBuffer, uint polygonIndex, float tripletAreaThreshold)
 	{
+		uint currIndex = batchPolygonBuffer[polygonIndex].startVertexIndex;
+		uint nextIndex = batchVertexBuffer[currIndex].nextIndex;
+
+		do
+		{
+			float tripletArea = batchVertexBuffer[currIndex].tripletArea;
+
+			if( tripletArea < tripletAreaThreshold )
+			{
+				RemoveVertex( ref batchVertexBuffer, ref batchPolygonBuffer, polygonIndex, currIndex, true, true );
+
+				currIndex = nextIndex;
+				nextIndex = batchVertexBuffer[currIndex].nextIndex;
+			}
+			else
+			{
+				currIndex = nextIndex;
+				nextIndex = batchVertexBuffer[currIndex].nextIndex;
+			}
+		}
+		while( currIndex != batchPolygonBuffer[polygonIndex].startVertexIndex );
+	}
+
+	static float GetPolygonArea(ref BatchVertex[] batchVertexBuffer, ref BatchPolygon[] batchPolygonBuffer, uint polygonIndex)
+	{
+		float polygonArea = 0.0f;
+
+		uint startVertexIndex = batchPolygonBuffer[polygonIndex].startVertexIndex;
+
+		uint currIndex = startVertexIndex;
+		uint prevIndex = batchVertexBuffer[currIndex].prevIndex;
+
+		Vector2 v0 = batchVertexBuffer[prevIndex].position;
+		Vector2 v1 = Vector2.zero;
+
+		do
+		{
+			v1 = batchVertexBuffer[currIndex].position;
+			polygonArea += v0.x*v1.y - v1.x*v0.y;
+			v0 = v1;
+
+			prevIndex = currIndex;
+			currIndex = batchVertexBuffer[currIndex].nextIndex;
+		}
+		while( currIndex != startVertexIndex );
+
+		return -0.5f * polygonArea;
+	}
+
+	static void ProcessPolygons(ref BatchVertex[] batchVertexBuffer, ref BatchPolygon[] batchPolygonBuffer, uint numBatchVertices, uint numBatchPolygons, uint minEdges, uint numProcessingPasses)
+	{
+		float RedundantEdgeCosineAngle0 = Mathf.Cos( 3.33333f * Mathf.Deg2Rad );
+
 		for( uint polygonIndex=0; polygonIndex<numBatchPolygons; polygonIndex++ )
 		{
-			if( inBatchPolygonBuffer[polygonIndex].processed == 1 )
+			InitializeEdges( ref batchVertexBuffer, ref batchPolygonBuffer, polygonIndex );
+
+			#if SHOW_POLYGON_PROCESSING_PASSES
+			uint processingPassesLeft = numProcessingPasses;
+			#endif
+
+			#if SHOW_POLYGON_PROCESSING_PASSES
+			if( processingPassesLeft == 0 ) continue;
+			#endif
+
+			RemoveRedundantEdges( ref batchVertexBuffer, ref batchPolygonBuffer, polygonIndex, RedundantEdgeCosineAngle0 );
+			if( batchPolygonBuffer[polygonIndex].numVertices <= minEdges ) continue;
+
+			#if SHOW_POLYGON_PROCESSING_PASSES
+			processingPassesLeft--;
+			if( processingPassesLeft == 0 ) continue;
+			#endif
+
+			const uint CAVITY = 0;
+			RemoveLocalConcavity( ref batchVertexBuffer, ref batchPolygonBuffer, polygonIndex, CAVITY );
+			if( batchPolygonBuffer[polygonIndex].numVertices <= minEdges ) continue;
+
+			#if SHOW_POLYGON_PROCESSING_PASSES
+			processingPassesLeft--;
+			if( processingPassesLeft == 0 ) continue;
+			#endif
+
+			RemoveRedundantEdges( ref batchVertexBuffer, ref batchPolygonBuffer, polygonIndex, RedundantEdgeCosineAngle0 );
+			if( batchPolygonBuffer[polygonIndex].numVertices <= minEdges ) continue;
+
+			#if SHOW_POLYGON_PROCESSING_PASSES
+			processingPassesLeft--;
+			if( processingPassesLeft == 0 ) continue;
+			#endif
+
+			InitializeTriplets( ref batchVertexBuffer, ref batchPolygonBuffer, polygonIndex );
+
+			uint prevNumVertices = batchPolygonBuffer[polygonIndex].numVertices + 1;
+			float polygonReferenceArea = GetPolygonArea( ref batchVertexBuffer, ref batchPolygonBuffer, polygonIndex );
+			float polygonArea = polygonReferenceArea;
+			while( prevNumVertices > batchPolygonBuffer[polygonIndex].numVertices && polygonArea > polygonReferenceArea * 0.995f )
 			{
-				continue;
+				float averageTripletArea;
+				float lowerAverageTripletArea;
+				float upperAverageTripletArea;
+
+				prevNumVertices = batchPolygonBuffer[polygonIndex].numVertices;
+				GetPolygonTripletStatistics( ref batchVertexBuffer, ref batchPolygonBuffer, polygonIndex, out averageTripletArea, out lowerAverageTripletArea, out upperAverageTripletArea );
+				RemoveLesserTriplets( ref batchVertexBuffer, ref batchPolygonBuffer, polygonIndex, lowerAverageTripletArea );
+				if( batchPolygonBuffer[polygonIndex].numVertices <= minEdges ) break;
+
+				#if SHOW_POLYGON_PROCESSING_PASSES
+				processingPassesLeft--;
+				if( processingPassesLeft == 0 ) break;
+				#endif
+
+				polygonArea = GetPolygonArea( ref batchVertexBuffer, ref batchPolygonBuffer, polygonIndex );
 			}
+			if( batchPolygonBuffer[polygonIndex].numVertices <= minEdges ) continue;
 
-			uint startVertexIndex = 0;
-			for( uint vertexIndex=inBatchPolygonBuffer[polygonIndex].startVertexIndex; vertexIndex<=inBatchPolygonBuffer[polygonIndex].endVertexIndex; vertexIndex++ )
-			{
-				if( inFlagBuffer[vertexIndex] == 1 )
-				{
-					startVertexIndex = vertexIndex;
-					break;
-				}
-			}
-
-			if( startVertexIndex == inBatchPolygonBuffer[polygonIndex].endVertexIndex )
-			{
-				outBatchPolygonBuffer[polygonIndex].processed = 1;
-				outBatchPolygonBuffer[polygonIndex].startVertexIndex = startVertexIndex;
-				outBatchPolygonBuffer[polygonIndex].endVertexIndex = startVertexIndex;
-				outBatchPolygonBuffer[polygonIndex].numVertices = inFlagBuffer[startVertexIndex];
-				outBatchPolygonBuffer[polygonIndex].polygonArea = 0.0f;
-				outBatchPolygonBuffer[polygonIndex].averageTripletArea = 0.0f;
-				outBatchPolygonBuffer[polygonIndex].lowerAverageTripletArea = 0.0f;
-				outBatchPolygonBuffer[polygonIndex].upperAverageTripletArea = 0.0f;
-				outBatchPolygonBuffer[polygonIndex].averageEdgeLength = 0.0f;
-				outBatchPolygonBuffer[polygonIndex].lowerAverageEdgeLength = 0.0f;
-				outBatchPolygonBuffer[polygonIndex].upperAverageEdgeLength = 0.0f;
-				outBatchPolygonBuffer[polygonIndex].maxEdgeStartVertex = uint.MaxValue;
-				outBatchPolygonBuffer[polygonIndex].maxEdgeEndVertex = uint.MaxValue;
-				outBatchPolygonSizeBuffer[polygonIndex] = 1;
-			}
-			else
-			{
-				uint numVertices = 1;
-				uint endVertexIndex = startVertexIndex;
-				while( inAjacencyBuffer[endVertexIndex].nextIndex != startVertexIndex )
-				{
-					numVertices++;
-					endVertexIndex = inAjacencyBuffer[endVertexIndex].nextIndex;
-				}
-				outBatchPolygonBuffer[polygonIndex].startVertexIndex = startVertexIndex;
-				outBatchPolygonBuffer[polygonIndex].endVertexIndex = endVertexIndex;
-				outBatchPolygonBuffer[polygonIndex].numVertices = numVertices;
-
-				float polygonArea = 0.0f;
-				float averageTripletArea = 0.0f;
-				float averageEdgeLength = 0.0f;
-				float maxEdgeLength = 0.0f;
-				uint maxEdgeStartVertex = uint.MaxValue;
-				uint maxEdgeEndVertex = uint.MaxValue;
-				uint vertexIndex = startVertexIndex;
-				uint numUnlockedTriplets = 0;
-				Vector2 v0 = inVertexPositionBuffer[vertexIndex];
-				Vector2 v1 = Vector2.zero;
-				while( vertexIndex != endVertexIndex )
-				{
-					vertexIndex = inAjacencyBuffer[vertexIndex].nextIndex;
-					v1 = inVertexPositionBuffer[vertexIndex];
-					polygonArea += v0.x*v1.y - v1.x*v0.y;
-					if( inTripletFlagBuffer[vertexIndex] == 1 )
-					{
-						averageTripletArea += inTripletAreaBuffer[vertexIndex];
-						numUnlockedTriplets++;
-					}
-					averageEdgeLength += inAjacencyBuffer[vertexIndex].nextEdgeLength;
-					if( inTripletFlagBuffer[vertexIndex] == 1 || inTripletFlagBuffer[inAjacencyBuffer[vertexIndex].nextIndex] == 1 )
-					{
-						if( maxEdgeLength < inAjacencyBuffer[vertexIndex].nextEdgeLength )
-						{
-							maxEdgeLength = inAjacencyBuffer[vertexIndex].nextEdgeLength;
-							maxEdgeStartVertex = vertexIndex;
-							maxEdgeEndVertex = inAjacencyBuffer[vertexIndex].nextIndex;
-						}
-					}
-					v0 = v1;
-				}
-				v1 = inVertexPositionBuffer[startVertexIndex];
-				polygonArea += v0.x*v1.y - v1.x*v0.y;
-
-				if( inTripletFlagBuffer[endVertexIndex] == 1 )
-				{
-					averageTripletArea += inTripletAreaBuffer[endVertexIndex];
-					numUnlockedTriplets++;
-				}
-
-				if( numUnlockedTriplets > 0 )
-				{
-					averageTripletArea = averageTripletArea / numUnlockedTriplets;
-				}
-
-				averageEdgeLength += inAjacencyBuffer[endVertexIndex].nextEdgeLength;
-				averageEdgeLength = averageEdgeLength / numVertices;
-
-				if( inTripletFlagBuffer[endVertexIndex] == 1 || inTripletFlagBuffer[inAjacencyBuffer[endVertexIndex].nextIndex] == 1 )
-				{
-					if( maxEdgeLength < inAjacencyBuffer[endVertexIndex].nextEdgeLength )
-					{
-						maxEdgeLength = inAjacencyBuffer[endVertexIndex].nextEdgeLength;
-						maxEdgeStartVertex = endVertexIndex;
-						maxEdgeEndVertex = inAjacencyBuffer[endVertexIndex].nextIndex;
-					}
-				}
-
-				float lowerAverageTripletArea = 0.0f;
-				float upperAverageTripletArea = 0.0f;
-				if( averageTripletArea > 0 )
-				{
-					uint numLowerAverageTriplets = 0;
-					uint numUpperAverageTriplets = 0;
-
-					vertexIndex = startVertexIndex;
-					while( vertexIndex != endVertexIndex )
-					{
-						if( inTripletFlagBuffer[vertexIndex] == 1 )
-						{
-							if( inTripletAreaBuffer[vertexIndex] < averageTripletArea )
-							{
-								lowerAverageTripletArea += inTripletAreaBuffer[vertexIndex];
-								numLowerAverageTriplets++;
-							}
-							else
-							{
-								upperAverageTripletArea += inTripletAreaBuffer[vertexIndex];
-								numUpperAverageTriplets++;
-							}
-						}
-
-						vertexIndex = inAjacencyBuffer[vertexIndex].nextIndex;
-					}
-
-					if( inTripletFlagBuffer[endVertexIndex] == 1 )
-					{
-						if( inTripletAreaBuffer[endVertexIndex] < averageTripletArea )
-						{
-							lowerAverageTripletArea += inTripletAreaBuffer[endVertexIndex];
-							numLowerAverageTriplets++;
-						}
-						else
-						{
-							upperAverageTripletArea += inTripletAreaBuffer[endVertexIndex];
-							numUpperAverageTriplets++;
-						}
-					}
-
-					if( numLowerAverageTriplets > 0 )
-					{
-						lowerAverageTripletArea = lowerAverageTripletArea / numLowerAverageTriplets;
-					}
-					else
-					{
-						lowerAverageTripletArea = 0.0f;
-					}
-
-					if( numUpperAverageTriplets > 0 )
-					{
-						upperAverageTripletArea = upperAverageTripletArea / numUpperAverageTriplets;
-					}
-					else
-					{
-						upperAverageTripletArea = 0.0f;
-					}
-				}
-
-				float lowerAverageEdgeLength = 0.0f;
-				float upperAverageEdgeLength = 0.0f;
-				if( averageEdgeLength > 0 )
-				{
-					uint numLowerAverageEdges = 0;
-					uint numUpperAverageEdges = 0;
-
-					vertexIndex = startVertexIndex;
-					while( vertexIndex != endVertexIndex )
-					{
-						if( inAjacencyBuffer[vertexIndex].nextEdgeLength < averageEdgeLength )
-						{
-							lowerAverageEdgeLength += inAjacencyBuffer[vertexIndex].nextEdgeLength;
-							numLowerAverageEdges++;
-						}
-						else
-						{
-							upperAverageEdgeLength += inAjacencyBuffer[vertexIndex].nextEdgeLength;
-							numUpperAverageEdges++;
-						}
-
-						vertexIndex = inAjacencyBuffer[vertexIndex].nextIndex;
-					}
-
-					if( inAjacencyBuffer[endVertexIndex].nextEdgeLength < averageEdgeLength )
-					{
-						lowerAverageEdgeLength += inAjacencyBuffer[endVertexIndex].nextEdgeLength;
-						numLowerAverageEdges++;
-					}
-					else
-					{
-						upperAverageEdgeLength += inAjacencyBuffer[endVertexIndex].nextEdgeLength;
-						numUpperAverageEdges++;
-					}
-
-					if( numLowerAverageEdges > 0 )
-					{
-						lowerAverageEdgeLength = lowerAverageEdgeLength / numLowerAverageEdges;
-					}
-					else
-					{
-						lowerAverageEdgeLength = 0.0f;
-					}
-
-					if( numUpperAverageEdges > 0 )
-					{
-						upperAverageEdgeLength = upperAverageEdgeLength / numUpperAverageEdges;
-					}
-					else
-					{
-						upperAverageEdgeLength = 0.0f;
-					}
-				}
-
-				if( maxEdgeLength < upperAverageEdgeLength )
-				{
-					maxEdgeLength = 0.0f;
-				}
-
-				if( updateStep == 0 )
-				{
-					outBatchPolygonBuffer[polygonIndex].processed = 0;
-				}
-				else
-				{
-					if( numVertices == inBatchPolygonBuffer[polygonIndex].numVertices )
-					{
-						outBatchPolygonBuffer[polygonIndex].processed = 1;
-					}
-					else
-					{
-						outBatchPolygonBuffer[polygonIndex].processed = 0;
-					}
-				}
-				outBatchPolygonBuffer[polygonIndex].numVertices = numVertices;
-				outBatchPolygonBuffer[polygonIndex].polygonArea = -0.5f * polygonArea;
-				outBatchPolygonBuffer[polygonIndex].averageTripletArea = averageTripletArea;
-				outBatchPolygonBuffer[polygonIndex].lowerAverageTripletArea = lowerAverageTripletArea;
-				outBatchPolygonBuffer[polygonIndex].upperAverageTripletArea = upperAverageTripletArea;
-				outBatchPolygonBuffer[polygonIndex].averageEdgeLength = averageEdgeLength;
-				outBatchPolygonBuffer[polygonIndex].lowerAverageEdgeLength = lowerAverageEdgeLength;
-				outBatchPolygonBuffer[polygonIndex].upperAverageEdgeLength = upperAverageEdgeLength;
-				outBatchPolygonBuffer[polygonIndex].maxEdgeStartVertex = maxEdgeStartVertex;
-				outBatchPolygonBuffer[polygonIndex].maxEdgeEndVertex = maxEdgeEndVertex;
-				outBatchPolygonSizeBuffer[polygonIndex] = numVertices;
-			}
+			#if SHOW_POLYGON_PROCESSING_PASSES
+			if( processingPassesLeft == 0 ) continue;
+			#endif		
 		}
 	}
 }

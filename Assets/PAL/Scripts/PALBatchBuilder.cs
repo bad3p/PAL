@@ -205,6 +205,11 @@ static public class PALBatchBuilder
 				NumPolygons++;
 				NumVertices += polygonalAreaLight.Vertices.Length;
 				BufferSize += requiredBufferSize;
+				polygonalAreaLight.BatchIndex = 1;
+			}
+			else
+			{
+				polygonalAreaLight.BatchIndex = 0;
 			}
 		}
 
@@ -218,7 +223,7 @@ static public class PALBatchBuilder
 			{
 				continue;
 			}
-			if( vertexBufferOffset+polygonalAreaLight.Vertices.Length >= _propertyValue.Length )
+			if( polygonalAreaLight.BatchIndex == 0 )
 			{
 				continue;
 			}
