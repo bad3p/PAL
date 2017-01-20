@@ -118,7 +118,7 @@ public partial class IrradianceTransfer : MonoBehaviour
 	const float kDecodeAlphaFactor = (1/16581375.0f)/255f;
 
 	// ComputeShader constants
-	const int GPUGroupSize = 128;
+	const int GPUGroupSize = 32;
 	#endregion
 
 	#region EmbeddedTypes
@@ -217,6 +217,9 @@ public partial class IrradianceTransfer : MonoBehaviour
 
 	#region PublicFields
 	[Header("Settings")]
+	[Tooltip("This area light will illuminate constantly changing part of a scene.")]
+	public bool AlwaysUpdate = false;
+
 	[Tooltip("Resolution of auxiliary render textures.")]
 	public IrradianceMapResolution Resolution = IrradianceMapResolution._32x32;
 
@@ -289,6 +292,15 @@ public partial class IrradianceTransfer : MonoBehaviour
 	#region MonoBehaviour
 	void Awake()
 	{
+		System.Func<Vector3,Vector3,float,Vector3> Slerp = (v1, v2, t) =>
+		{
+			float cosAngle = Vector3.Dot( v1, v2 );
+			float angle = Mathf.Acos( cosAngle );
+			float sinAngle = Mathf.Sin( angle );
+
+			return ( Mathf.Sin( (1-t) * angle ) / sinAngle ) * v1 + ( Mathf.Sin( t * angle ) / sinAngle ) * v2;
+		};
+
 		_thisTransform = this.transform;
 
 		string[] s = Resolution.ToString().Trim( '_' ).Split( 'x' );
@@ -423,10 +435,11 @@ public partial class IrradianceTransfer : MonoBehaviour
 		transformChanged = transformChanged || ( _offscreenCamera.fieldOfView != OffscreenCameraFOV );
 		bool intensityChanged = Mathf.Abs( _meshAreaLight.Intensity - _prevIntensity ) > Mathf.Epsilon;
 
-#if false
-		transformChanged = true;
-		intensityChanged = true;
-#endif
+		if( AlwaysUpdate )
+		{
+			transformChanged = true;
+			intensityChanged = true;
+		}
 
 		if( !transformChanged && !intensityChanged )
 		{
