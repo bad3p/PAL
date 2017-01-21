@@ -243,12 +243,18 @@ float4 PALSpecularContribution(float3 worldPos, float3 worldRefl)
 				int jPlusOne = j+1;
 				if( j == lastVertexIndex-1 ) jPlusOne = firstVertexIndex;
 
+				//float edgeDistanceY = ( _PALPointBuffer[jPlusOne].y - _PALPointBuffer[j].y );
+				//float edgeDistanceX = ( _PALPointBuffer[jPlusOne].x - _PALPointBuffer[j].x );
+
+				float edgeDistanceY = _PALPointBuffer[j].w;
+				float edgeDistanceX = _PALPointBuffer[j].z;
+
        			if( ( ( _PALPointBuffer[j].y <= localPoint.y ) && ( _PALPointBuffer[jPlusOne].y > localPoint.y) ) || 
        		    	( ( _PALPointBuffer[j].y > localPoint.y ) && ( _PALPointBuffer[jPlusOne].y <= localPoint.y) ) ) 
        			{
-            		float vt = ( localPoint.y - _PALPointBuffer[j].y ) / ( _PALPointBuffer[jPlusOne].y - _PALPointBuffer[j].y );
+            		float vt = ( localPoint.y - _PALPointBuffer[j].y ) / edgeDistanceY;
 
-            		if( localPoint.x < _PALPointBuffer[j].x + vt * ( _PALPointBuffer[jPlusOne].x - _PALPointBuffer[j].x) )
+            		if( localPoint.x < _PALPointBuffer[j].x + vt * edgeDistanceX )
             		{
             			crossingNumber++;
             		}
@@ -317,6 +323,13 @@ float4 PALSmoothSpecularContribution(float3 worldPos, float3 worldRefl0, float3 
 				float edgeDistanceY = ( _PALPointBuffer[jPlusOne].y - _PALPointBuffer[j].y );
 				float edgeDistanceX = ( _PALPointBuffer[jPlusOne].x - _PALPointBuffer[j].x );
 
+				//float edgeDistanceY = _PALPointBuffer[j].w;
+				//float edgeDistanceX = _PALPointBuffer[j].z;
+
+				float4 localPointY = float4( localPoint1.y, localPoint2.y, localPoint3.y, localPoint4.y );
+				float4 vtj = ( localPointY - _PALPointBuffer[j].y ) / edgeDistanceY;
+				vtj = _PALPointBuffer[j].x + vtj * edgeDistanceX;
+
        			if( ( ( _PALPointBuffer[j].y <= localPoint0.y ) && ( _PALPointBuffer[jPlusOne].y > localPoint0.y) ) || 
        		    	( ( _PALPointBuffer[j].y > localPoint0.y ) && ( _PALPointBuffer[jPlusOne].y <= localPoint0.y) ) ) 
        			{
@@ -330,8 +343,9 @@ float4 PALSmoothSpecularContribution(float3 worldPos, float3 worldRefl0, float3 
 				if( ( ( _PALPointBuffer[j].y <= localPoint1.y ) && ( _PALPointBuffer[jPlusOne].y > localPoint1.y) ) || 
        		    	( ( _PALPointBuffer[j].y > localPoint1.y ) && ( _PALPointBuffer[jPlusOne].y <= localPoint1.y) ) ) 
        			{
-            		float vt = ( localPoint1.y - _PALPointBuffer[j].y ) / edgeDistanceY;
-            		if( localPoint1.x < _PALPointBuffer[j].x + vt * edgeDistanceX )
+            		//float vt = ( localPoint1.y - _PALPointBuffer[j].y ) / edgeDistanceY;
+            		//if( localPoint1.x < _PALPointBuffer[j].x + vtj.x * edgeDistanceX )
+            		if( localPoint1.x < vtj.x )
             		{
             			crossingNumber1++;
             		}
@@ -340,8 +354,9 @@ float4 PALSmoothSpecularContribution(float3 worldPos, float3 worldRefl0, float3 
 				if( ( ( _PALPointBuffer[j].y <= localPoint2.y ) && ( _PALPointBuffer[jPlusOne].y > localPoint2.y) ) || 
        		    	( ( _PALPointBuffer[j].y > localPoint2.y ) && ( _PALPointBuffer[jPlusOne].y <= localPoint2.y) ) ) 
        			{
-            		float vt = ( localPoint2.y - _PALPointBuffer[j].y ) / edgeDistanceY;
-            		if( localPoint2.x < _PALPointBuffer[j].x + vt * edgeDistanceX )
+            		//float vt = ( localPoint2.y - _PALPointBuffer[j].y ) / edgeDistanceY;
+            		//if( localPoint2.x < _PALPointBuffer[j].x + vtj.y * edgeDistanceX )
+            		if( localPoint2.x < vtj.y )
             		{
             			crossingNumber2++;
             		}
@@ -350,8 +365,9 @@ float4 PALSmoothSpecularContribution(float3 worldPos, float3 worldRefl0, float3 
 				if( ( ( _PALPointBuffer[j].y <= localPoint3.y ) && ( _PALPointBuffer[jPlusOne].y > localPoint3.y) ) || 
        		    	( ( _PALPointBuffer[j].y > localPoint3.y ) && ( _PALPointBuffer[jPlusOne].y <= localPoint3.y) ) ) 
        			{
-            		float vt = ( localPoint3.y - _PALPointBuffer[j].y ) / edgeDistanceY;
-            		if( localPoint3.x < _PALPointBuffer[j].x + vt * edgeDistanceX )
+            		//float vt = ( localPoint3.y - _PALPointBuffer[j].y ) / edgeDistanceY;
+            		//if( localPoint3.x < _PALPointBuffer[j].x + vtj.z * edgeDistanceX )
+            		if( localPoint3.x < vtj.z )
             		{
             			crossingNumber3++;
             		}
@@ -360,8 +376,9 @@ float4 PALSmoothSpecularContribution(float3 worldPos, float3 worldRefl0, float3 
 				if( ( ( _PALPointBuffer[j].y <= localPoint4.y ) && ( _PALPointBuffer[jPlusOne].y > localPoint4.y) ) || 
        		    	( ( _PALPointBuffer[j].y > localPoint4.y ) && ( _PALPointBuffer[jPlusOne].y <= localPoint4.y) ) ) 
        			{
-            		float vt = ( localPoint4.y - _PALPointBuffer[j].y ) / edgeDistanceY;
-            		if( localPoint4.x < _PALPointBuffer[j].x + vt * edgeDistanceX )
+            		//float vt = ( localPoint4.y - _PALPointBuffer[j].y ) / edgeDistanceY;
+            		//if( localPoint4.x < _PALPointBuffer[j].x + vtj.w * edgeDistanceX )
+            		if( localPoint4.x < vtj.w )
             		{
             			crossingNumber4++;
             		}

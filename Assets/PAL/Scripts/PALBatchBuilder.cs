@@ -208,6 +208,17 @@ static public class PALBatchBuilder
 
 				Vector3 point = polygonalAreaLight.Vertices[j] - polygonalAreaLight.Vertices[0];
 				_pointBuffer[vertexBufferOffset+j].Set( Vector3.Dot( point, tangent ), Vector3.Dot( point, bitangent ), 0, 0 );
+
+				if( j > 0 )
+				{
+					_pointBuffer[vertexBufferOffset+j-1].z = _pointBuffer[vertexBufferOffset+j].x - _pointBuffer[vertexBufferOffset+j-1].x;
+					_pointBuffer[vertexBufferOffset+j-1].w = _pointBuffer[vertexBufferOffset+j].y - _pointBuffer[vertexBufferOffset+j-1].y;
+					if( j == polygonalAreaLight.Vertices.Length-1 )
+					{
+						_pointBuffer[vertexBufferOffset+j].z = _pointBuffer[vertexBufferOffset].x - _pointBuffer[vertexBufferOffset+j].x;
+						_pointBuffer[vertexBufferOffset+j].w = _pointBuffer[vertexBufferOffset].y - _pointBuffer[vertexBufferOffset+j].y;
+					}
+				}
 			}
 
 			// descriptor
@@ -323,6 +334,16 @@ static public class PALBatchBuilder
 				Vector3 point = polygonalAreaLight.Vertices[j] - polygonalAreaLight.Vertices[0];
 				_pointBuffer[j].Set( Vector3.Dot( point, tangent ), Vector3.Dot( point, bitangent ), 0, 0 );
 
+				if( j > 0 )
+				{
+					_pointBuffer[j-1].z = _pointBuffer[j].x - _pointBuffer[j-1].x;
+					_pointBuffer[j-1].w = _pointBuffer[j].y - _pointBuffer[j-1].y;
+					if( j == polygonalAreaLight.Vertices.Length-1 )
+					{
+						_pointBuffer[j].z = _pointBuffer[0].x - _pointBuffer[j].x;
+						_pointBuffer[j].w = _pointBuffer[0].y - _pointBuffer[j].y;
+					}
+				}
 			}
 
 			// descriptor
