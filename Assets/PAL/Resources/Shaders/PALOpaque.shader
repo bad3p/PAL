@@ -1,7 +1,7 @@
 //
 // POLYGONAL AREA LIGHTS
 // The MIT License (MIT)
-// Copyright (c) 2016 ALEXANDER PETRYAEV
+// Copyright (c) 2016-2017 ALEXANDER PETRYAEV
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal 
@@ -26,7 +26,7 @@ Shader "PAL/Opaque"
 	Properties 
 	{
 		_MainTex ("Base (RGB)", 2D) = "white" {}
-
+		[Toggle(_PAL_SPECULAR)] _Specular ("Specular", float) = 0
 		[Toggle(_PAL_BUMPY)] _Bumpiness ("Bumpiness", float) = 0
 		_NormalMap ("Normal map", 2D) = "white" {}
 	}
@@ -53,6 +53,7 @@ Shader "PAL/Opaque"
 			#pragma fragmentoption ARB_precision_hint_fastest
 			#pragma exclude_renderers d3d11_9x
 
+			#pragma multi_compile _ _PAL_SPECULAR
 			#pragma multi_compile _ _PAL_BUMPY
 			#pragma multi_compile _ _PAL_PROJECTION_WEIGHTED
 			#pragma multi_compile _ _PAL_ALBEDO
@@ -83,17 +84,18 @@ Shader "PAL/Opaque"
 				float4 pos          : SV_POSITION;
 				float2 uv           : TEXCOORD0;
 				float3 worldPos     : TEXCOORD1;
+				float3 worldViewDir : TEXCOORD2;
 				#if defined(_PAL_BUMPY)
-					float3 tangentSpace0 : TEXCOORD2;
-					float3 tangentSpace1 : TEXCOORD3;
-					float3 tangentSpace2 : TEXCOORD4;
+					float3 tangentSpace0 : TEXCOORD3;
+					float3 tangentSpace1 : TEXCOORD4;
+					float3 tangentSpace2 : TEXCOORD5;
 					#if defined(FOG_LINEAR) || defined(FOG_EXP) || defined(FOG_EXP2)
-                		UNITY_FOG_COORDS(5)
+                		UNITY_FOG_COORDS(6)
                 	#endif
 				#else
-					float3 worldNormal  : TEXCOORD2;
+					float3 worldNormal  : TEXCOORD3;
 					#if defined(FOG_LINEAR) || defined(FOG_EXP) || defined(FOG_EXP2)
-                		UNITY_FOG_COORDS(3)
+                		UNITY_FOG_COORDS(4)
                 	#endif
 				#endif
 			};
@@ -104,6 +106,7 @@ Shader "PAL/Opaque"
 				o.pos = mul( UNITY_MATRIX_MVP, v.vertex );
 				o.uv = TRANSFORM_TEX( v.texcoord, _MainTex );
 				o.worldPos = mul( unity_ObjectToWorld, v.vertex ).xyz;
+				o.worldViewDir = WorldSpaceViewDir( v.vertex );
 
 				#if defined(_PAL_BUMPY)
 					float3 worldViewDir = normalize( UnityWorldSpaceViewDir( o.worldPos ) );
@@ -142,6 +145,38 @@ Shader "PAL/Opaque"
 					#endif
 
 					result.xyz *= ( UNITY_LIGHTMODEL_AMBIENT + PALDiffuseContribution( i.worldPos, worldNormal ) );
+
+
+
+					#if defined(_PAL_SPECULAR)
+						#if defined(_PAL_BUMPY)
+							float2 ddy_uv = ddy( i.uv );
+							float2 ddx_uv = ddx( i.uv );
+
+							float3 worldRefl0 = reflect( i.worldViewDir, worldNormal );
+
+							tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv + ddx_uv ) ).xyz;
+							worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
+							float3 worldRefl1 = reflect( i.worldViewDir, worldNormal );
+
+							tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv - ddx_uv ) ).xyz;
+							worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
+							float3 worldRefl2 = reflect( i.worldViewDir, worldNormal );
+
+							tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv + ddy_uv ) ).xyz;
+							worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
+							float3 worldRefl3 = reflect( i.worldViewDir, worldNormal );
+
+							tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv - ddy_uv ) ).xyz;
+							worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
+							float3 worldRefl4 = reflect( i.worldViewDir, worldNormal );
+
+							result.xyz += PALSmoothSpecularContribution( i.worldPos, worldRefl0, worldRefl1, worldRefl2, worldRefl3, worldRefl4 );
+						#else
+							float3 worldRefl = reflect( i.worldViewDir, worldNormal );
+							result.xyz += PALSpecularContribution( i.worldPos, worldRefl );
+						#endif
+					#endif
 
 					#if defined(FOG_LINEAR) || defined(FOG_EXP) || defined(FOG_EXP2)
                 		UNITY_APPLY_FOG( i.fogCoord, result ); 

@@ -1,7 +1,7 @@
 ﻿//
 // POLYGONAL AREA LIGHTS
 // The MIT License (MIT)
-// Copyright (c) 2016 ALEXANDER PETRYAEV
+// Copyright (c) 2016-2017 ALEXANDER PETRYAEV
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal 
@@ -292,15 +292,6 @@ public partial class IrradianceTransfer : MonoBehaviour
 	#region MonoBehaviour
 	void Awake()
 	{
-		System.Func<Vector3,Vector3,float,Vector3> Slerp = (v1, v2, t) =>
-		{
-			float cosAngle = Vector3.Dot( v1, v2 );
-			float angle = Mathf.Acos( cosAngle );
-			float sinAngle = Mathf.Sin( angle );
-
-			return ( Mathf.Sin( (1-t) * angle ) / sinAngle ) * v1 + ( Mathf.Sin( t * angle ) / sinAngle ) * v2;
-		};
-
 		_thisTransform = this.transform;
 
 		string[] s = Resolution.ToString().Trim( '_' ).Split( 'x' );

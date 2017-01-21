@@ -1,0 +1,15 @@
+﻿<Properties StartupItem="Assembly-CSharp.csproj">
+  <MonoDevelop.Ide.Workspace ActiveConfiguration="Debug" PreferredExecutionTarget="Unity.Instance.Unity Editor" />
+  <MonoDevelop.Ide.Workbench ActiveDocument="Assets\PAL\Resources\Shaders\PALOpaque.shader">
+    <Files>
+      <File FileName="Assets\PAL\Resources\Shaders\PAL.cginc" Line="363" Column="54" />
+      <File FileName="Assets\PAL\Resources\Shaders\PALOpaque.shader" Line="152" Column="30" />
+    </Files>
+  </MonoDevelop.Ide.Workbench>
+  <MonoDevelop.Ide.DebuggingService.Breakpoints>
+    <BreakpointStore />
+  </MonoDevelop.Ide.DebuggingService.Breakpoints>
+  <MonoDevelop.Ide.DebuggingService.PinnedWatches>
+    <Watch file="Assets\PAL\Scripts\IrradianceTransfer.cs" line="531" offsetX="606" offsetY="8144" expression="irradiancePolygon.Vertices" liveUpdate="False" />
+  </MonoDevelop.Ide.DebuggingService.PinnedWatches>
+</Properties>

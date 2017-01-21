@@ -1,7 +1,7 @@
 ﻿//
 // POLYGONAL AREA LIGHTS
 // The MIT License (MIT)
-// Copyright (c) 2016 ALEXANDER PETRYAEV
+// Copyright (c) 2016-2017 ALEXANDER PETRYAEV
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal 
@@ -36,69 +36,6 @@ public class PolygonalAreaLight
 	public ProjectionMode ProjectionMode = ProjectionMode.Centered;
 	public Vector3[] Vertices = new Vector3[0];
 	public int BatchIndex = 0;
-
-	public float GetIlluminationIntensity(Vector3 position, Vector3 normal, ProjectionMode projectionMode)
-	{
-		float planeDistance = -Vector3.Dot( normal, position );
-
-		Vector3 pointOnPolygon;
-		if( projectionMode == ProjectionMode.Weighted )
-		{
-			pointOnPolygon = Vector3.zero;
-			float weightSum = 0;
-			for( int j=0; j<Vertices.Length; j++ )
-			{
-				float weight = 1.0f / Vector3.Distance( Vertices[j], position );
-				weightSum += weight;
-				pointOnPolygon += Vertices[j] * weight;
-			}
-			pointOnPolygon *= 1.0f / weightSum;
-		}
-		else
-		{
-			pointOnPolygon = Centroid;
-		}
-
-		Vector3 projectionBasisZ = ( pointOnPolygon - position ).normalized;
-		float sideCondition = Vector3.Dot( projectionBasisZ, Normal );
-		if( sideCondition < 0 )
-		{
-			Vector3 projectionBasisY = new Vector3( projectionBasisZ.y, projectionBasisZ.z, -projectionBasisZ.x );
-			Vector3 projectionBasisX = Vector3.Cross( projectionBasisY, projectionBasisZ ).normalized;
-			projectionBasisY = Vector3.Cross( projectionBasisZ, projectionBasisX ).normalized;
-
-			Vector3 biasOffset = projectionBasisZ * Circumcircle.w * Bias;
-			Vector3 biasedWorldPos = position - biasOffset;
-
-			float polygonArea = 0;
-
-			Vector3 v0 = Vertices[0] - biasedWorldPos;
-			v0.Set( Vector3.Dot( v0, projectionBasisX ), Vector3.Dot( v0, projectionBasisY ), Vector3.Dot( v0, projectionBasisZ ) );
-			v0.x /= v0.z;
-			v0.y /= v0.z;
-
-			for( int j=1; j<Vertices.Length; j++ )
-			{
-				Vector3 v1 = Vertices[j] - biasedWorldPos; 
-				v1.Set( Vector3.Dot( v1, projectionBasisX ), Vector3.Dot( v1, projectionBasisY ), Vector3.Dot( v1, projectionBasisZ ) );
-				v1.x /= v1.z;
-				v1.y /= v1.z;
-
-				polygonArea += v0.x*v1.y - v1.x*v0.y; 
-
-				v0 = v1; 
-			}
-
-			float distanceToFragmentPlane = Vector3.Dot( Circumcircle, Normal ) + planeDistance;
-			float localOcclusion = Mathf.Clamp01( ( distanceToFragmentPlane+Circumcircle.w )/( 2 * Circumcircle.w ) );
-
-			return -0.5f * polygonArea * Intensity * localOcclusion;
-		}
-		else
-		{
-			return 0;
-		}
-	}
 };
 
 static public class PALBatchBuilder
@@ -150,24 +87,56 @@ static public class PALBatchBuilder
 
 	static int                 _lastFrameCount = -1;
 	static int                 _numAreaLightsUpdated = 0;
-	static string[]            _propertyId = new string[0];
-	static Vector4[]           _propertyValue = new Vector4[0];
+	static string[]            _polygonBufferPropertyId = new string[0];
+	static string[]            _vertexBufferPropertyId = new string[0];
+	static string[]            _pointBufferPropertyId = new string[0];
+	static Vector4[]           _polygonBuffer = new Vector4[0];
+	static Vector4[]           _vertexBuffer = new Vector4[0];
+	static Vector4[]           _pointBuffer = new Vector4[0];
 	static Vector4             _bufferSizes = Vector4.zero;	
 
 	public static void Update(PolygonalAreaLight updatedPolygonalAreaLight)
 	{
-		if( _propertyId.Length != ShaderConstantBufferSize )
+		if( _polygonBufferPropertyId.Length != ShaderConstantBufferSize )
 		{
-			_propertyId = new string[ShaderConstantBufferSize];
+			_polygonBufferPropertyId = new string[ShaderConstantBufferSize];
 			for( int i=0; i<ShaderConstantBufferSize; i++ )
 			{
-				_propertyId[i] = "_PALBuffer" + i.ToString();
+				_polygonBufferPropertyId[i] = "_PALPolygonBuffer" + i.ToString();
 			}
 		}
 
-		if( _propertyValue.Length != ShaderConstantBufferSize )
+		if( _vertexBufferPropertyId.Length != ShaderConstantBufferSize )
 		{
-			_propertyValue = new Vector4[ShaderConstantBufferSize];
+			_vertexBufferPropertyId = new string[ShaderConstantBufferSize];
+			for( int i=0; i<ShaderConstantBufferSize; i++ )
+			{
+				_vertexBufferPropertyId[i] = "_PALVertexBuffer" + i.ToString();
+			}
+		}
+
+		if( _pointBufferPropertyId.Length != ShaderConstantBufferSize )
+		{
+			_pointBufferPropertyId = new string[ShaderConstantBufferSize];
+			for( int i=0; i<ShaderConstantBufferSize; i++ )
+			{
+				_pointBufferPropertyId[i] = "_PALPointBuffer" + i.ToString();
+			}
+		}
+
+		if( _polygonBuffer.Length != ShaderConstantBufferSize )
+		{
+			_polygonBuffer = new Vector4[ShaderConstantBufferSize];
+		}
+
+		if( _vertexBuffer.Length != ShaderConstantBufferSize )
+		{
+			_vertexBuffer = new Vector4[ShaderConstantBufferSize];
+		}
+
+		if( _pointBuffer.Length != ShaderConstantBufferSize )
+		{
+			_pointBuffer = new Vector4[ShaderConstantBufferSize];
 		}
 
 		if( _lastFrameCount != Time.frameCount )
@@ -213,7 +182,7 @@ static public class PALBatchBuilder
 			}
 		}
 
-		int vertexBufferOffset = NumPolygons * 5;
+		int vertexBufferOffset = 0;
 
 		int batchIndex = 0;
 		for( int k=0; k<_polygonalAreaLights.Count; k++ )
@@ -229,13 +198,20 @@ static public class PALBatchBuilder
 			}
 			polygonalAreaLight.BatchIndex = batchIndex;
 
+			Vector3 tangent = new Vector3( polygonalAreaLight.Normal.y, polygonalAreaLight.Normal.z, -polygonalAreaLight.Normal.x );
+			Vector3 bitangent = Vector3.Cross( tangent, polygonalAreaLight.Normal ).normalized;
+			tangent = Vector3.Cross( polygonalAreaLight.Normal, bitangent ).normalized;
+
 			for( int j=0; j<polygonalAreaLight.Vertices.Length; j++ )
 			{
-				_propertyValue[vertexBufferOffset+j] = polygonalAreaLight.Vertices[j];
+				_vertexBuffer[vertexBufferOffset+j] = polygonalAreaLight.Vertices[j];
+
+				Vector3 point = polygonalAreaLight.Vertices[j] - polygonalAreaLight.Vertices[0];
+				_pointBuffer[vertexBufferOffset+j].Set( Vector3.Dot( point, tangent ), Vector3.Dot( point, bitangent ), 0, 0 );
 			}
 
 			// descriptor
-			_propertyValue[batchIndex*5].Set(
+			_polygonBuffer[batchIndex*7].Set(
 				vertexBufferOffset, 
 				vertexBufferOffset + polygonalAreaLight.Vertices.Length,
 				polygonalAreaLight.Intensity,
@@ -243,24 +219,34 @@ static public class PALBatchBuilder
 			);
 
 			// precalculated data
-			_propertyValue[batchIndex*5+1] = polygonalAreaLight.Color;
-			_propertyValue[batchIndex*5+2] = polygonalAreaLight.Normal;
-			_propertyValue[batchIndex*5+3] = polygonalAreaLight.Centroid;
-			_propertyValue[batchIndex*5+4] = polygonalAreaLight.Circumcircle;
+			_polygonBuffer[batchIndex*7+1] = polygonalAreaLight.Color;
+			_polygonBuffer[batchIndex*7+2] = polygonalAreaLight.Normal;
+			_polygonBuffer[batchIndex*7+2].w = -Vector3.Dot( polygonalAreaLight.Normal, polygonalAreaLight.Vertices[0] );
+			_polygonBuffer[batchIndex*7+3] = tangent;
+			_polygonBuffer[batchIndex*7+4] = bitangent;
+			_polygonBuffer[batchIndex*7+5] = polygonalAreaLight.Centroid;
+			_polygonBuffer[batchIndex*7+6] = polygonalAreaLight.Circumcircle;
 
 			vertexBufferOffset += polygonalAreaLight.Vertices.Length;
 			batchIndex++;
 		}
 
-		_bufferSizes.Set( NumPolygons, 0, 0, 0 );
+		_bufferSizes.Set( NumPolygons, NumVertices, 0, 0 );
 		Shader.SetGlobalVector( "_PALBufferSizes", _bufferSizes );
 
 		#if UNITY_5_4_OR_NEWER
-			Shader.SetGlobalVectorArray( "_PALBuffer", _propertyValue );
+			Shader.SetGlobalVectorArray( "_PALPolygonBuffer", _polygonBuffer );
+			Shader.SetGlobalVectorArray( "_PALVertexBuffer", _vertexBuffer );
+			Shader.SetGlobalVectorArray( "_PALPointBuffer", _pointBuffer );
 		#else
-			for( int i=0; i<BufferSize; i++ )
+			for( int i=0; i<NumPolygons; i++ )
 			{
-				Shader.SetGlobalVector( _propertyId[i], _propertyValue[i] );
+				Shader.SetGlobalVector( _polygonBufferPropertyId[i], _polygonBuffer[i] );				
+			}
+			for( int i=0; i<NumVertices; i++ )
+			{
+				Shader.SetGlobalVector( _vertexBufferPropertyId[i], _vertexBuffer[i] );
+				Shader.SetGlobalVector( _pointBufferPropertyId[i], _pointBuffer[i] );
 			}
 		#endif
 
@@ -282,77 +268,97 @@ static public class PALBatchBuilder
 
 	public static void ExclusiveUpdate(PolygonalAreaLight polygonalAreaLight)
 	{
-		if( _propertyId.Length != ShaderConstantBufferSize )
+		if( _polygonBufferPropertyId.Length != ShaderConstantBufferSize )
 		{
-			_propertyId = new string[ShaderConstantBufferSize];
+			_polygonBufferPropertyId = new string[ShaderConstantBufferSize];
 			for( int i=0; i<ShaderConstantBufferSize; i++ )
 			{
-				_propertyId[i] = "_PALBuffer" + i.ToString();
+				_polygonBufferPropertyId[i] = "_PALPolygonBuffer" + i.ToString();
 			}
 		}
 
-		if( _propertyValue.Length != ShaderConstantBufferSize )
+		if( _vertexBufferPropertyId.Length != ShaderConstantBufferSize )
 		{
-			_propertyValue = new Vector4[ShaderConstantBufferSize];
-		}
-
-		int numPolygonsEx = 0;
-		int numVerticesEx = 0;
-		int bufferSizeEx = 0;
-
-		if( polygonalAreaLight.Vertices.Length >= 3 )
-		{
-			int requiredBufferSize = 5 + polygonalAreaLight.Vertices.Length;
-			if( bufferSizeEx + requiredBufferSize < ShaderConstantBufferSize )
+			_vertexBufferPropertyId = new string[ShaderConstantBufferSize];
+			for( int i=0; i<ShaderConstantBufferSize; i++ )
 			{
-				numPolygonsEx++;
-				numVerticesEx += polygonalAreaLight.Vertices.Length;
-				bufferSizeEx += requiredBufferSize;
+				_vertexBufferPropertyId[i] = "_PALVertexBuffer" + i.ToString();
 			}
 		}
 
-		int vertexBufferOffset = numPolygonsEx * 5;
+		if( _pointBufferPropertyId.Length != ShaderConstantBufferSize )
+		{
+			_pointBufferPropertyId = new string[ShaderConstantBufferSize];
+			for( int i=0; i<ShaderConstantBufferSize; i++ )
+			{
+				_pointBufferPropertyId[i] = "_PALPointBuffer" + i.ToString();
+			}
+		}
+
+		if( _polygonBuffer.Length != ShaderConstantBufferSize )
+		{
+			_polygonBuffer = new Vector4[ShaderConstantBufferSize];
+		}
+
+		if( _vertexBuffer.Length != ShaderConstantBufferSize )
+		{
+			_vertexBuffer = new Vector4[ShaderConstantBufferSize];
+		}
+
+		if( _pointBuffer.Length != ShaderConstantBufferSize )
+		{
+			_pointBuffer = new Vector4[ShaderConstantBufferSize];
+		}
 
 		if( polygonalAreaLight.Vertices.Length >= 3 )
 		{
+			Vector3 tangent = new Vector3( polygonalAreaLight.Normal.y, polygonalAreaLight.Normal.z, -polygonalAreaLight.Normal.x );
+			Vector3 bitangent = Vector3.Cross( tangent, polygonalAreaLight.Normal ).normalized;
+			tangent = Vector3.Cross( polygonalAreaLight.Normal, bitangent ).normalized;
+
 			for( int j=0; j<polygonalAreaLight.Vertices.Length; j++ )
 			{
-				try
-				{
-				_propertyValue[vertexBufferOffset+j] = polygonalAreaLight.Vertices[j];
-				}
-				catch( System.IndexOutOfRangeException )
-				{
-					Debug.LogError( "Woops! vertexBufferOffset+j = " + (vertexBufferOffset+j).ToString() + " j = " + j.ToString() );
-				}
+				_vertexBuffer[j] = polygonalAreaLight.Vertices[j];
+
+				Vector3 point = polygonalAreaLight.Vertices[j] - polygonalAreaLight.Vertices[0];
+				_pointBuffer[j].Set( Vector3.Dot( point, tangent ), Vector3.Dot( point, bitangent ), 0, 0 );
+
 			}
 
 			// descriptor
-			_propertyValue[0].Set(
-				vertexBufferOffset, 
-				vertexBufferOffset + polygonalAreaLight.Vertices.Length,
+			_polygonBuffer[0].Set(
+				0, 
+				polygonalAreaLight.Vertices.Length,
 				polygonalAreaLight.Intensity,
 				polygonalAreaLight.Bias
 			);
 
 			// precalculated data
-			_propertyValue[1] = polygonalAreaLight.Color;
-			_propertyValue[2] = polygonalAreaLight.Normal;
-			_propertyValue[3] = polygonalAreaLight.Centroid;
-			_propertyValue[4] = polygonalAreaLight.Circumcircle;
-
-			vertexBufferOffset += polygonalAreaLight.Vertices.Length;
+			_polygonBuffer[1] = polygonalAreaLight.Color;
+			_polygonBuffer[2] = polygonalAreaLight.Normal;
+			_polygonBuffer[2].w = -Vector3.Dot( polygonalAreaLight.Normal, polygonalAreaLight.Vertices[0] );
+			_polygonBuffer[3] = tangent;
+			_polygonBuffer[4] = bitangent;
+			_polygonBuffer[5] = polygonalAreaLight.Centroid;
+			_polygonBuffer[6] = polygonalAreaLight.Circumcircle;
 		}
 
-		_bufferSizes.Set( numPolygonsEx, 0, 0, 0 );
+		_bufferSizes.Set( 1, polygonalAreaLight.Vertices.Length, 0, 0 );
 		Shader.SetGlobalVector( "_PALBufferSizes", _bufferSizes );
 
 		#if UNITY_5_4_OR_NEWER
-			Shader.SetGlobalVectorArray( "_PALBuffer", _propertyValue );
+			Shader.SetGlobalVectorArray( "_PALPolygonBuffer", _polygonBuffer );
+			Shader.SetGlobalVectorArray( "_PALVertexBuffer", _vertexBuffer );
+			Shader.SetGlobalVectorArray( "_PALPointBuffer", _pointBuffer );
 		#else
-			for( int i=0; i<BufferSize; i++ )
+			for( int i=0; i<NumPolygons; i++ )
 			{
-				Shader.SetGlobalVector( _propertyId[i], _propertyValue[i] );
+				Shader.SetGlobalVector( _polygonBufferPropertyId[i], _polygonBuffer[i] );				
+			}
+			for( int i=0; i<NumVertices; i++ )
+			{
+				Shader.SetGlobalVector( _vertexBufferPropertyId[i], _vertexBuffer[i] );
+				Shader.SetGlobalVector( _pointBufferPropertyId[i], _pointBuffer[i] );
 			}
 		#endif
 
