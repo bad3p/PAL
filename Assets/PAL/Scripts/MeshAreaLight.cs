@@ -80,17 +80,19 @@ public class MeshAreaLight : MonoBehaviour
 		PALBatchBuilder.RegisterPolygonalAreaLight( _polygonalAreaLight );
 	}
 
-	void OnDestroy() 
-	{		
+	void OnDisable()
+	{
 		PALBatchBuilder.UnregisterPolygonalAreaLight( _polygonalAreaLight );
 	}
 
-	void OnEnable() 
+	void OnEnable()
 	{
+		PALBatchBuilder.RegisterPolygonalAreaLight( _polygonalAreaLight );
 	}
 
-	void OnDisable() 
-	{
+	void OnDestroy() 
+	{		
+		PALBatchBuilder.UnregisterPolygonalAreaLight( _polygonalAreaLight );
 	}
 
 	void Update() 
