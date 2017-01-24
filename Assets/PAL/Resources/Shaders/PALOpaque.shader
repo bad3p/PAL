@@ -154,11 +154,11 @@ Shader "PAL/Opaque"
 								float2 ddy_uv = ddy( i.uv );
 								float2 ddx_uv = ddx( i.uv );
 
-								tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv + ddx_uv ) ).xyz;
+								tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv ) ).xyz;
 								worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
 								float3 worldRefl1 = reflect( i.worldViewDir, worldNormal );
 
-								tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv - ddx_uv ) ).xyz;
+								tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv + ddx_uv ) ).xyz;
 								worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
 								float3 worldRefl2 = reflect( i.worldViewDir, worldNormal );
 
@@ -166,7 +166,7 @@ Shader "PAL/Opaque"
 								worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
 								float3 worldRefl3 = reflect( i.worldViewDir, worldNormal );
 
-								tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv - ddy_uv ) ).xyz;
+								tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv + ddx_uv + ddy_uv ) ).xyz;
 								worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
 								float3 worldRefl4 = reflect( i.worldViewDir, worldNormal );
 
