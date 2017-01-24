@@ -154,8 +154,6 @@ Shader "PAL/Opaque"
 								float2 ddy_uv = ddy( i.uv );
 								float2 ddx_uv = ddx( i.uv );
 
-								float3 worldRefl0 = reflect( i.worldViewDir, worldNormal );
-
 								tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv + ddx_uv ) ).xyz;
 								worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
 								float3 worldRefl1 = reflect( i.worldViewDir, worldNormal );
@@ -172,7 +170,7 @@ Shader "PAL/Opaque"
 								worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
 								float3 worldRefl4 = reflect( i.worldViewDir, worldNormal );
 
-								result.xyz += PALSmoothSpecularContribution( i.worldPos, worldRefl0, worldRefl1, worldRefl2, worldRefl3, worldRefl4 );
+								result.xyz += PALSmoothSpecularContribution( i.worldPos, worldRefl1, worldRefl2, worldRefl3, worldRefl4 );
 							#else
 								float3 worldRefl = reflect( i.worldViewDir, worldNormal );
 								result.xyz += PALSpecularContribution( i.worldPos, worldRefl );

@@ -52,6 +52,7 @@
      <Compile Include="Assets\PAL\Scripts\IrradianceTransferShared.cs" />
      <Compile Include="Assets\PAL\Scripts\MeshAreaLight.cs" />
      <Compile Include="Assets\PAL\Scripts\PALBatchBuilder.cs" />
+     <Compile Include="Assets\PAL\Scripts\Performance.cs" />
      <Compile Include="Assets\PAL\Scripts\Pyramid.cs" />
      <None Include="Assets\PAL\Resources\Shaders\PALDepthBuffer.shader" />
      <None Include="Assets\PAL\Resources\Shaders\PALIlluminationBuffer.shader" />

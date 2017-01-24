@@ -34,13 +34,14 @@ uniform float4 _PALPointBuffer[1023];
 #define PAL_NUM_POLYGONS (int)_PALBufferSizes.x
 #define PAL_NUM_VERTICES (int)_PALBufferSizes.y
 
-#define PAL_POLYGON_DESC(polygonIndex) _PALPolygonBuffer[polygonIndex*7] 
-#define PAL_POLYGON_COLOR(polygonIndex) _PALPolygonBuffer[polygonIndex*7+1]
-#define PAL_POLYGON_NORMAL(polygonIndex) _PALPolygonBuffer[polygonIndex*7+2]
-#define PAL_POLYGON_TANGENT(polygonIndex) _PALPolygonBuffer[polygonIndex*7+3]
-#define PAL_POLYGON_BITANGENT(polygonIndex) _PALPolygonBuffer[polygonIndex*7+4]
-#define PAL_POLYGON_CENTROID(polygonIndex) _PALPolygonBuffer[polygonIndex*7+5]
-#define PAL_POLYGON_CIRCUMCIRCLE(polygonIndex) _PALPolygonBuffer[polygonIndex*7+6]
+#define PAL_POLYGON_DESC(polygonIndex) _PALPolygonBuffer[polygonIndex*8] 
+#define PAL_POLYGON_COLOR(polygonIndex) _PALPolygonBuffer[polygonIndex*8+1]
+#define PAL_POLYGON_NORMAL(polygonIndex) _PALPolygonBuffer[polygonIndex*8+2]
+#define PAL_POLYGON_TANGENT(polygonIndex) _PALPolygonBuffer[polygonIndex*8+3]
+#define PAL_POLYGON_BITANGENT(polygonIndex) _PALPolygonBuffer[polygonIndex*8+4]
+#define PAL_POLYGON_CENTROID(polygonIndex) _PALPolygonBuffer[polygonIndex*8+5]
+#define PAL_POLYGON_CIRCUMCIRCLE(polygonIndex) _PALPolygonBuffer[polygonIndex*8+6]
+#define PAL_POLYGON_LOCAL_CIRCUMCIRCLE(polygonIndex) _PALPolygonBuffer[polygonIndex*8+7]
 
 float PALLocalOcclusion(float4 polygonCircumcircle, float4 fragmentPlane)
 {
@@ -207,6 +208,11 @@ float3 RayPlaneIntersection(float4 plane, float3 pointOnPlane, float3 rayOrigin,
 	return rayOrigin + rayDirection * s;
 }
 
+int isLeft(float2 p0, float2 p1, float2 p2)
+{
+    return ( (p1.x - p0.x) * (p2.y - p0.y) - (p2.x -  p0.x) * (p1.y - p0.y) );
+}
+
 float4 PALSpecularContribution(float3 worldPos, float3 worldRefl)
 {
 	int numPolygons = PAL_NUM_POLYGONS;
@@ -221,6 +227,7 @@ float4 PALSpecularContribution(float3 worldPos, float3 worldRefl)
 		float4 polygonCentroid = PAL_POLYGON_CENTROID(i);
 		float4 polygonTangent = PAL_POLYGON_TANGENT(i);
 		float4 polygonBitangent = PAL_POLYGON_BITANGENT(i);
+		float4 polygonLocalCircumcircle = PAL_POLYGON_LOCAL_CIRCUMCIRCLE(i);
 		float intensity = polygonDesc.z;
 
 		float3 worldPosToPolygonDir = polygonCentroid.xyz - worldPos;
@@ -234,36 +241,37 @@ float4 PALSpecularContribution(float3 worldPos, float3 worldRefl)
 			float3 intersectionOffset = intersectionPoint - _PALVertexBuffer[firstVertexIndex].xyz;
 			float2 localPoint = float2( dot( polygonTangent, intersectionOffset ), dot( polygonBitangent, intersectionOffset ) );
 
-			// The Crossing Number method
-			// http://geomalgorithms.com/a03-_inclusion.html
-
-			uint crossingNumber = 0;
-			for( int j=firstVertexIndex; j<lastVertexIndex; j++ )
+			if( distance( localPoint, polygonLocalCircumcircle.xy ) < polygonLocalCircumcircle.z )
 			{
-				int jPlusOne = j+1;
-				if( j == lastVertexIndex-1 ) jPlusOne = firstVertexIndex;
+				// http://geomalgorithms.com/a03-_inclusion.html
+				uint crossingNumber = 0;
+				for( int j=firstVertexIndex; j<lastVertexIndex; j++ )
+				{
+					int jPlusOne = j+1;
+					if( j == lastVertexIndex-1 ) jPlusOne = firstVertexIndex;
 
-				//float edgeDistanceY = ( _PALPointBuffer[jPlusOne].y - _PALPointBuffer[j].y );
-				//float edgeDistanceX = ( _PALPointBuffer[jPlusOne].x - _PALPointBuffer[j].x );
+					//float edgeDistanceY = ( _PALPointBuffer[jPlusOne].y - _PALPointBuffer[j].y );
+					//float edgeDistanceX = ( _PALPointBuffer[jPlusOne].x - _PALPointBuffer[j].x );
 
-				float edgeDistanceY = _PALPointBuffer[j].w;
-				float edgeDistanceX = _PALPointBuffer[j].z;
+					float edgeDistanceY = _PALPointBuffer[j].w;
+					float edgeDistanceX = _PALPointBuffer[j].z;
 
-       			if( ( ( _PALPointBuffer[j].y <= localPoint.y ) && ( _PALPointBuffer[jPlusOne].y > localPoint.y) ) || 
-       		    	( ( _PALPointBuffer[j].y > localPoint.y ) && ( _PALPointBuffer[jPlusOne].y <= localPoint.y) ) ) 
-       			{
-            		float vt = ( localPoint.y - _PALPointBuffer[j].y ) / edgeDistanceY;
+       				if( ( ( _PALPointBuffer[j].y <= localPoint.y ) && ( _PALPointBuffer[jPlusOne].y > localPoint.y) ) || 
+       		    		( ( _PALPointBuffer[j].y > localPoint.y ) && ( _PALPointBuffer[jPlusOne].y <= localPoint.y) ) ) 
+       				{
+            			float vt = ( localPoint.y - _PALPointBuffer[j].y ) / edgeDistanceY;
 
-            		if( localPoint.x < _PALPointBuffer[j].x + vt * edgeDistanceX )
-            		{
-            			crossingNumber++;
-            		}
-				}
-        	}
+            			if( localPoint.x < _PALPointBuffer[j].x + vt * edgeDistanceX )
+            			{
+            				crossingNumber++;
+            			}
+					}
+        		}
 
-        	if( crossingNumber % 2 != 0 )
-        	{
-        		specularColor += intensity * polygonColor;
+        		if( crossingNumber % 2 != 0 )
+        		{
+        			specularColor += intensity * polygonColor;
+        		}
         	}
         }
 	}
@@ -278,7 +286,7 @@ float2 PointInPolygonSpace(float4 plane, float3 planeOrigin, float3 planeTangent
 	return float2( dot( planeTangent, intersectionOffset ), dot( planeBitangent, intersectionOffset ) );
 }
 
-float4 PALSmoothSpecularContribution(float3 worldPos, float3 worldRefl0, float3 worldRefl1, float3 worldRefl2, float3 worldRefl3, float3 worldRefl4)
+float4 PALSmoothSpecularContribution(float3 worldPos, float3 worldRefl1, float3 worldRefl2, float3 worldRefl3, float3 worldRefl4)
 {
 	int numPolygons = PAL_NUM_POLYGONS;
 
@@ -296,20 +304,19 @@ float4 PALSmoothSpecularContribution(float3 worldPos, float3 worldRefl0, float3 
 
 		float3 worldPosToPolygonDir = polygonCentroid.xyz - worldPos;
 
-		if( dot( polygonNormal.xyz, worldRefl0 ) > 0 && dot( polygonNormal.xyz, worldPosToPolygonDir ) < 0 )
+		if( dot( polygonNormal.xyz, worldRefl1 ) > 0 && dot( polygonNormal.xyz, worldPosToPolygonDir ) < 0 )
 		{
 			int firstVertexIndex = (int)polygonDesc.x;
 			int lastVertexIndex = (int)polygonDesc.y;
 
 			float3 planeOrigin = _PALVertexBuffer[firstVertexIndex].xyz;
 
-			float2 localPoint0 = PointInPolygonSpace( polygonNormal, planeOrigin, polygonTangent, polygonBitangent, worldPos, worldRefl0 );
 			float2 localPoint1 = PointInPolygonSpace( polygonNormal, planeOrigin, polygonTangent, polygonBitangent, worldPos, worldRefl1 );
 			float2 localPoint2 = PointInPolygonSpace( polygonNormal, planeOrigin, polygonTangent, polygonBitangent, worldPos, worldRefl2 );
 			float2 localPoint3 = PointInPolygonSpace( polygonNormal, planeOrigin, polygonTangent, polygonBitangent, worldPos, worldRefl3 );
 			float2 localPoint4 = PointInPolygonSpace( polygonNormal, planeOrigin, polygonTangent, polygonBitangent, worldPos, worldRefl4 );
+			float4 localPointY = float4( localPoint1.y, localPoint2.y, localPoint3.y, localPoint4.y );
 
-			uint crossingNumber0 = 0;
 			uint crossingNumber1 = 0;
 			uint crossingNumber2 = 0;
 			uint crossingNumber3 = 0;
@@ -326,22 +333,23 @@ float4 PALSmoothSpecularContribution(float3 worldPos, float3 worldRefl0, float3 
 				//float edgeDistanceY = _PALPointBuffer[j].w;
 				//float edgeDistanceX = _PALPointBuffer[j].z;
 
-				float4 localPointY = float4( localPoint1.y, localPoint2.y, localPoint3.y, localPoint4.y );
 				float4 vtj = ( localPointY - _PALPointBuffer[j].y ) / edgeDistanceY;
 				vtj = _PALPointBuffer[j].x + vtj * edgeDistanceX;
 
-       			if( ( ( _PALPointBuffer[j].y <= localPoint0.y ) && ( _PALPointBuffer[jPlusOne].y > localPoint0.y) ) || 
-       		    	( ( _PALPointBuffer[j].y > localPoint0.y ) && ( _PALPointBuffer[jPlusOne].y <= localPoint0.y) ) ) 
-       			{
-            		float vt = ( localPoint0.y - _PALPointBuffer[j].y ) / edgeDistanceY;
-            		if( localPoint0.x < _PALPointBuffer[j].x + vt * edgeDistanceX )
-            		{
-            			crossingNumber0++;
-            		}
-				}
+				float4 vyj = float4( _PALPointBuffer[j].y, _PALPointBuffer[j].y, _PALPointBuffer[j].y, _PALPointBuffer[j].y );
+				float4 vyjPlusOne = float4( _PALPointBuffer[jPlusOne].y, _PALPointBuffer[jPlusOne].y, _PALPointBuffer[jPlusOne].y, _PALPointBuffer[jPlusOne].y );
 
-				if( ( ( _PALPointBuffer[j].y <= localPoint1.y ) && ( _PALPointBuffer[jPlusOne].y > localPoint1.y) ) || 
-       		    	( ( _PALPointBuffer[j].y > localPoint1.y ) && ( _PALPointBuffer[jPlusOne].y <= localPoint1.y) ) ) 
+				bool4 vyj_lesserOrEqualThan_lpy = ( vyj <= localPointY );
+				bool4 vyjPlusOne_greaterThan_lpy = ( vyjPlusOne > localPointY );
+				bool4 vyj_greaterThan_lpy = ( vyj > localPointY );
+				bool4 vyjPlusOne_lesserOrEqualThan_lpy = ( vyjPlusOne <= localPointY );
+				bool4 vyj_lesserOrEqualThan_lpy_and_vyjPlusOne_greaterThan_lpy = vyj_lesserOrEqualThan_lpy && vyjPlusOne_greaterThan_lpy;
+				bool4 vyj_greaterThan_lpy_and_vyjPlusOne_lesserOrEqualThan_lpy = vyj_greaterThan_lpy && vyjPlusOne_lesserOrEqualThan_lpy;
+				bool4 finalCondition = vyj_lesserOrEqualThan_lpy_and_vyjPlusOne_greaterThan_lpy || vyj_greaterThan_lpy_and_vyjPlusOne_lesserOrEqualThan_lpy;
+
+				//if( ( ( _PALPointBuffer[j].y <= localPoint1.y ) && ( _PALPointBuffer[jPlusOne].y > localPoint1.y) ) || 
+       		    //	( ( _PALPointBuffer[j].y > localPoint1.y ) && ( _PALPointBuffer[jPlusOne].y <= localPoint1.y) ) ) 
+       		    if( finalCondition.x )
        			{
             		//float vt = ( localPoint1.y - _PALPointBuffer[j].y ) / edgeDistanceY;
             		//if( localPoint1.x < _PALPointBuffer[j].x + vtj.x * edgeDistanceX )
@@ -351,8 +359,9 @@ float4 PALSmoothSpecularContribution(float3 worldPos, float3 worldRefl0, float3 
             		}
 				}
 
-				if( ( ( _PALPointBuffer[j].y <= localPoint2.y ) && ( _PALPointBuffer[jPlusOne].y > localPoint2.y) ) || 
-       		    	( ( _PALPointBuffer[j].y > localPoint2.y ) && ( _PALPointBuffer[jPlusOne].y <= localPoint2.y) ) ) 
+				//if( ( ( _PALPointBuffer[j].y <= localPoint2.y ) && ( _PALPointBuffer[jPlusOne].y > localPoint2.y) ) || 
+       		    //	( ( _PALPointBuffer[j].y > localPoint2.y ) && ( _PALPointBuffer[jPlusOne].y <= localPoint2.y) ) ) 
+       		    if( finalCondition.y )
        			{
             		//float vt = ( localPoint2.y - _PALPointBuffer[j].y ) / edgeDistanceY;
             		//if( localPoint2.x < _PALPointBuffer[j].x + vtj.y * edgeDistanceX )
@@ -362,8 +371,9 @@ float4 PALSmoothSpecularContribution(float3 worldPos, float3 worldRefl0, float3 
             		}
 				}
 
-				if( ( ( _PALPointBuffer[j].y <= localPoint3.y ) && ( _PALPointBuffer[jPlusOne].y > localPoint3.y) ) || 
-       		    	( ( _PALPointBuffer[j].y > localPoint3.y ) && ( _PALPointBuffer[jPlusOne].y <= localPoint3.y) ) ) 
+				//if( ( ( _PALPointBuffer[j].y <= localPoint3.y ) && ( _PALPointBuffer[jPlusOne].y > localPoint3.y) ) || 
+       		    //	( ( _PALPointBuffer[j].y > localPoint3.y ) && ( _PALPointBuffer[jPlusOne].y <= localPoint3.y) ) ) 
+       		    if( finalCondition.z )
        			{
             		//float vt = ( localPoint3.y - _PALPointBuffer[j].y ) / edgeDistanceY;
             		//if( localPoint3.x < _PALPointBuffer[j].x + vtj.z * edgeDistanceX )
@@ -373,8 +383,9 @@ float4 PALSmoothSpecularContribution(float3 worldPos, float3 worldRefl0, float3 
             		}
 				}
 
-				if( ( ( _PALPointBuffer[j].y <= localPoint4.y ) && ( _PALPointBuffer[jPlusOne].y > localPoint4.y) ) || 
-       		    	( ( _PALPointBuffer[j].y > localPoint4.y ) && ( _PALPointBuffer[jPlusOne].y <= localPoint4.y) ) ) 
+				//if( ( ( _PALPointBuffer[j].y <= localPoint4.y ) && ( _PALPointBuffer[jPlusOne].y > localPoint4.y) ) || 
+       		    //	( ( _PALPointBuffer[j].y > localPoint4.y ) && ( _PALPointBuffer[jPlusOne].y <= localPoint4.y) ) ) 
+       		    if( finalCondition.w )
        			{
             		//float vt = ( localPoint4.y - _PALPointBuffer[j].y ) / edgeDistanceY;
             		//if( localPoint4.x < _PALPointBuffer[j].x + vtj.w * edgeDistanceX )
@@ -386,11 +397,10 @@ float4 PALSmoothSpecularContribution(float3 worldPos, float3 worldRefl0, float3 
         	}
 
         	float averageIntensity = 0;
-        	if( crossingNumber0 % 2 != 0 ) averageIntensity += 0.2;
-        	if( crossingNumber1 % 2 != 0 ) averageIntensity += 0.2;
-        	if( crossingNumber2 % 2 != 0 ) averageIntensity += 0.2;
-        	if( crossingNumber3 % 2 != 0 ) averageIntensity += 0.2;
-        	if( crossingNumber4 % 2 != 0 ) averageIntensity += 0.2;
+        	if( crossingNumber1 & 1 ) averageIntensity += 0.25;
+        	if( crossingNumber2 & 1 ) averageIntensity += 0.25;
+        	if( crossingNumber3 & 1 ) averageIntensity += 0.25;
+        	if( crossingNumber4 & 1 ) averageIntensity += 0.25;
 
         	specularColor += averageIntensity * intensity * polygonColor;
 

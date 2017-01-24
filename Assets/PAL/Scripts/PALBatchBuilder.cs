@@ -222,7 +222,7 @@ static public class PALBatchBuilder
 			}
 
 			// descriptor
-			_polygonBuffer[batchIndex*7].Set(
+			_polygonBuffer[batchIndex*8].Set(
 				vertexBufferOffset, 
 				vertexBufferOffset + polygonalAreaLight.Vertices.Length,
 				polygonalAreaLight.Intensity,
@@ -230,13 +230,18 @@ static public class PALBatchBuilder
 			);
 
 			// precalculated data
-			_polygonBuffer[batchIndex*7+1] = polygonalAreaLight.Color;
-			_polygonBuffer[batchIndex*7+2] = polygonalAreaLight.Normal;
-			_polygonBuffer[batchIndex*7+2].w = -Vector3.Dot( polygonalAreaLight.Normal, polygonalAreaLight.Vertices[0] );
-			_polygonBuffer[batchIndex*7+3] = tangent;
-			_polygonBuffer[batchIndex*7+4] = bitangent;
-			_polygonBuffer[batchIndex*7+5] = polygonalAreaLight.Centroid;
-			_polygonBuffer[batchIndex*7+6] = polygonalAreaLight.Circumcircle;
+			Vector3 circumcenterOffset = polygonalAreaLight.Circumcircle;
+			circumcenterOffset = circumcenterOffset - polygonalAreaLight.Vertices[0];
+			_polygonBuffer[batchIndex*8+1] = polygonalAreaLight.Color;
+			_polygonBuffer[batchIndex*8+2] = polygonalAreaLight.Normal;
+			_polygonBuffer[batchIndex*8+2].w = -Vector3.Dot( polygonalAreaLight.Normal, polygonalAreaLight.Vertices[0] );
+			_polygonBuffer[batchIndex*8+3] = tangent;
+			_polygonBuffer[batchIndex*8+4] = bitangent;
+			_polygonBuffer[batchIndex*8+5] = polygonalAreaLight.Centroid;
+			_polygonBuffer[batchIndex*8+6] = polygonalAreaLight.Circumcircle;
+			_polygonBuffer[batchIndex*8+7].x = Vector3.Dot( tangent, circumcenterOffset );
+			_polygonBuffer[batchIndex*8+7].y = Vector3.Dot( bitangent, circumcenterOffset );
+			_polygonBuffer[batchIndex*8+7].z = polygonalAreaLight.Circumcircle.w;
 
 			vertexBufferOffset += polygonalAreaLight.Vertices.Length;
 			batchIndex++;
@@ -355,6 +360,8 @@ static public class PALBatchBuilder
 			);
 
 			// precalculated data
+			Vector3 circumcenterOffset = polygonalAreaLight.Circumcircle;
+			circumcenterOffset = circumcenterOffset - polygonalAreaLight.Vertices[0];
 			_polygonBuffer[1] = polygonalAreaLight.Color;
 			_polygonBuffer[2] = polygonalAreaLight.Normal;
 			_polygonBuffer[2].w = -Vector3.Dot( polygonalAreaLight.Normal, polygonalAreaLight.Vertices[0] );
@@ -362,6 +369,10 @@ static public class PALBatchBuilder
 			_polygonBuffer[4] = bitangent;
 			_polygonBuffer[5] = polygonalAreaLight.Centroid;
 			_polygonBuffer[6] = polygonalAreaLight.Circumcircle;
+			_polygonBuffer[7].x = Vector3.Dot( tangent, circumcenterOffset );
+			_polygonBuffer[7].y = Vector3.Dot( bitangent, circumcenterOffset );
+			_polygonBuffer[7].z = polygonalAreaLight.Circumcircle.w;
+
 		}
 
 		_bufferSizes.Set( 1, polygonalAreaLight.Vertices.Length, 0, 0 );
