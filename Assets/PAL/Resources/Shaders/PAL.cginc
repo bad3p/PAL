@@ -268,9 +268,11 @@ float4 PALSpecularContribution(float3 worldPos, float3 worldRefl)
 					}
         		}
 
+        		float fadeFactor = saturate( 1 / distance( intersectionPoint, worldPos ) );
+
         		if( crossingNumber % 2 != 0 )
         		{
-        			specularColor += intensity * polygonColor;
+        			specularColor += intensity * fadeFactor * polygonColor;
         		}
         	}
         }
@@ -279,10 +281,11 @@ float4 PALSpecularContribution(float3 worldPos, float3 worldRefl)
 	return specularColor;
 }
 
-float2 PointInPolygonSpace(float4 plane, float3 planeOrigin, float3 planeTangent, float3 planeBitangent, float3 worldRayOrigin, float3 worldRayDir)
+float2 PointInPolygonSpace(float4 plane, float3 planeOrigin, float3 planeTangent, float3 planeBitangent, float3 worldRayOrigin, float3 worldRayDir, out float fadeFactor)
 {
 	float3 intersectionPoint = RayPlaneIntersection( plane, planeOrigin, worldRayOrigin, worldRayDir );
 	float3 intersectionOffset = intersectionPoint - planeOrigin;
+	fadeFactor = saturate( 1.0 / distance( intersectionPoint, worldRayOrigin ) );
 	return float2( dot( planeTangent, intersectionOffset ), dot( planeBitangent, intersectionOffset ) );
 }
 
@@ -311,10 +314,15 @@ float4 PALSmoothSpecularContribution(float3 worldPos, float3 worldRefl1, float3 
 
 			float3 planeOrigin = _PALVertexBuffer[firstVertexIndex].xyz;
 
-			float2 localPoint1 = PointInPolygonSpace( polygonNormal, planeOrigin, polygonTangent, polygonBitangent, worldPos, worldRefl1 );
-			float2 localPoint2 = PointInPolygonSpace( polygonNormal, planeOrigin, polygonTangent, polygonBitangent, worldPos, worldRefl2 );
-			float2 localPoint3 = PointInPolygonSpace( polygonNormal, planeOrigin, polygonTangent, polygonBitangent, worldPos, worldRefl3 );
-			float2 localPoint4 = PointInPolygonSpace( polygonNormal, planeOrigin, polygonTangent, polygonBitangent, worldPos, worldRefl4 );
+			float fadeFactor1;
+			float fadeFactor2;
+			float fadeFactor3;
+			float fadeFactor4;
+
+			float2 localPoint1 = PointInPolygonSpace( polygonNormal, planeOrigin, polygonTangent, polygonBitangent, worldPos, worldRefl1, fadeFactor1 );
+			float2 localPoint2 = PointInPolygonSpace( polygonNormal, planeOrigin, polygonTangent, polygonBitangent, worldPos, worldRefl2, fadeFactor2 );
+			float2 localPoint3 = PointInPolygonSpace( polygonNormal, planeOrigin, polygonTangent, polygonBitangent, worldPos, worldRefl3, fadeFactor3 );
+			float2 localPoint4 = PointInPolygonSpace( polygonNormal, planeOrigin, polygonTangent, polygonBitangent, worldPos, worldRefl4, fadeFactor4 );
 			float4 localPointY = float4( localPoint1.y, localPoint2.y, localPoint3.y, localPoint4.y );
 
 			uint crossingNumber1 = 0;
@@ -397,10 +405,10 @@ float4 PALSmoothSpecularContribution(float3 worldPos, float3 worldRefl1, float3 
         	}
 
         	float averageIntensity = 0;
-        	if( crossingNumber1 & 1 ) averageIntensity += 0.25;
-        	if( crossingNumber2 & 1 ) averageIntensity += 0.25;
-        	if( crossingNumber3 & 1 ) averageIntensity += 0.25;
-        	if( crossingNumber4 & 1 ) averageIntensity += 0.25;
+        	if( crossingNumber1 & 1 ) averageIntensity += fadeFactor1 * 0.25;
+        	if( crossingNumber2 & 1 ) averageIntensity += fadeFactor2 * 0.25;
+        	if( crossingNumber3 & 1 ) averageIntensity += fadeFactor3 * 0.25;
+        	if( crossingNumber4 & 1 ) averageIntensity += fadeFactor4 * 0.25;
 
         	specularColor += averageIntensity * intensity * polygonColor;
 
