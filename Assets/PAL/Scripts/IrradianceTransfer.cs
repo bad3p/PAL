@@ -354,11 +354,11 @@ public partial class IrradianceTransfer : MonoBehaviour
 		_offscreenCamera = offscreenCameraObject.AddComponent<Camera>();
 
 		_albedoBufferShader = Shader.Find( "PAL/Opaque" );
-		_depthBufferShader = Shader.Find( "PAL/DepthBuffer" );
-		_normalBufferShader = Shader.Find( "PAL/NormalBuffer" );
-		_mergeBufferShader = Shader.Find( "PAL/MergeBuffer" );
-		_illuminationBufferShader = Shader.Find( "PAL/IlluminationBuffer" );
-		_geometryBufferShader = Shader.Find( "PAL/GeometryBuffer" );
+		_depthBufferShader = Shader.Find( "Hidden/PALDepthBuffer" );
+		_normalBufferShader = Shader.Find( "Hidden/PALNormalBuffer" );
+		_mergeBufferShader = Shader.Find( "Hidden/PALMergeBuffer" );
+		_illuminationBufferShader = Shader.Find( "Hidden/PALIlluminationBuffer" );
+		_geometryBufferShader = Shader.Find( "Hidden/PALGeometryBuffer" );
 		_mergeBufferMaterial = new Material( _mergeBufferShader );
 
 		int bufferWidth = (int)(_irradianceMapBufferResolution.x);

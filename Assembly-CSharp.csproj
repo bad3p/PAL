@@ -61,6 +61,7 @@
      <None Include="Assets\PAL\Resources\Shaders\PAL.compute" />
      <None Include="Assets\PAL\Resources\Shaders\PALOpaque.shader" />
      <None Include="Assets\PAL\Resources\Shaders\PAL.cginc" />
+     <None Include="Assets\PAL\Resources\Shaders\PALDeferredLighting.shader" />
      <None Include="Assets\PAL\Resources\Shaders\PALGeometryBuffer.shader" />
  <Reference Include="UnityEngine.UI">
  <HintPath>C:/Program Files/Unity/Editor/Data/UnityExtensions/Unity/GUISystem/UnityEngine.UI.dll</HintPath>

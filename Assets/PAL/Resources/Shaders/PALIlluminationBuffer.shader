@@ -21,7 +21,7 @@
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-Shader "PAL/IlluminationBuffer"
+Shader "Hidden/PALIlluminationBuffer"
 {   
 	Properties 
 	{

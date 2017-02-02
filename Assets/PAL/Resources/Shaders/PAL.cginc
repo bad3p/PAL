@@ -89,7 +89,8 @@ float4 PALDiffuseContribution(float3 worldPos, float3 worldNormal)
 
 		float3 projectionBasisZ = normalize( pointOnPolygon - worldPos );
 		float sideCondition = dot( projectionBasisZ, polygonNormal );
-		if( sideCondition < 0 )
+		float normalCondition = dot( worldNormal, polygonNormal );
+		if( sideCondition < 0 && normalCondition < 0.9999 )
 		{
 			float3 projectionBasisY = float3( projectionBasisZ.y, projectionBasisZ.z, -projectionBasisZ.x );
 			float3 projectionBasisX = normalize( cross( projectionBasisY, projectionBasisZ ) );
@@ -167,7 +168,8 @@ float PALDiffuseIntensity(float3 worldPos, float3 worldNormal)
 
 		float3 projectionBasisZ = normalize( pointOnPolygon - worldPos );
 		float sideCondition = dot( projectionBasisZ, polygonNormal );
-		if( sideCondition < 0 )
+		float normalCondition = dot( worldNormal, polygonNormal );
+		if( sideCondition < 0 && normalCondition < 0.9999 )
 		{
 			float3 projectionBasisY = float3( projectionBasisZ.y, projectionBasisZ.z, -projectionBasisZ.x );
 			float3 projectionBasisX = normalize( cross( projectionBasisY, projectionBasisZ ) );
