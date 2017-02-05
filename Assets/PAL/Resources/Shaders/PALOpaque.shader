@@ -28,6 +28,7 @@ Shader "PAL/Opaque"
 		_MainTex ("Base (RGB)", 2D) = "white" {}
 		[Toggle(_PAL_SPECULAR)] _Specular ("Specular", float) = 0
 		[Toggle(_PAL_SMOOTH_SPECULAR)] _SmoothSpecular ("Smooth specular", float) = 0
+		_PhongExponent ("Phong Exponent", Range(1.0, 100.0)) = 2.0
 		[Toggle(_PAL_BUMPY)] _Bumpiness ("Bumpiness", float) = 0
 		_NormalMap ("Normal map", 2D) = "white" {}
 	}
@@ -66,6 +67,7 @@ Shader "PAL/Opaque"
 
 			sampler2D _MainTex;
 			float4    _MainTex_ST;
+			float     _PhongExponent;
 
 			#if defined(_PAL_BUMPY)
 				sampler2D _NormalMap;
@@ -151,33 +153,37 @@ Shader "PAL/Opaque"
 					#if defined(_PAL_SPECULAR)
 						#if defined(_PAL_BUMPY)
 							#if defined(_PAL_SMOOTH_SPECULAR)
-								float2 ddy_uv = ddy( i.uv );
-								float2 ddx_uv = ddx( i.uv );
+								//float2 ddy_uv = ddy( i.uv );
+								//float2 ddx_uv = ddx( i.uv );
 
-								tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv ) ).xyz;
-								worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
+								//tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv ) ).xyz;
+								//worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
 								float3 worldRefl1 = reflect( i.worldViewDir, worldNormal );
 
-								tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv + ddx_uv ) ).xyz;
-								worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
-								float3 worldRefl2 = reflect( i.worldViewDir, worldNormal );
+								//tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv + ddx_uv ) ).xyz;
+								//worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
+								//float3 worldRefl2 = reflect( i.worldViewDir, worldNormal );
 
-								tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv + ddy_uv ) ).xyz;
-								worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
-								float3 worldRefl3 = reflect( i.worldViewDir, worldNormal );
+								//tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv + ddy_uv ) ).xyz;
+								//worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
+								//float3 worldRefl3 = reflect( i.worldViewDir, worldNormal );
 
-								tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv + ddx_uv + ddy_uv ) ).xyz;
-								worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
-								float3 worldRefl4 = reflect( i.worldViewDir, worldNormal );
+								//tangentSpaceNormal = UnpackNormal( tex2D( _NormalMap, i.uv + ddx_uv + ddy_uv ) ).xyz;
+								//worldNormal = normalize( float3( dot( i.tangentSpace0, tangentSpaceNormal ), dot( i.tangentSpace1, tangentSpaceNormal ), dot( i.tangentSpace2, tangentSpaceNormal ) ) );
+								//float3 worldRefl4 = reflect( i.worldViewDir, worldNormal );
 
-								result.xyz += PALSmoothSpecularContribution( i.worldPos, worldRefl1, worldRefl2, worldRefl3, worldRefl4 );
+								//result.xyz += PALSmoothSpecularContribution( i.worldPos, worldRefl1, worldRefl2, worldRefl3, worldRefl4 );
+
+								result.xyz += PALBufferedSpecularContribution( i.worldPos, worldNormal, worldRefl1, _PhongExponent );
 							#else
 								float3 worldRefl = reflect( i.worldViewDir, worldNormal );
-								result.xyz += PALSpecularContribution( i.worldPos, worldRefl );
+								//result.xyz += PALSpecularContribution( i.worldPos, worldRefl );
+								result.xyz += PALBufferedSpecularContribution( i.worldPos,worldNormal,  worldRefl, _PhongExponent );
 							#endif
 						#else
 							float3 worldRefl = reflect( i.worldViewDir, worldNormal );
-							result.xyz += PALSpecularContribution( i.worldPos, worldRefl );
+							//result.xyz += PALSpecularContribution( i.worldPos, worldRefl );
+							result.xyz += PALBufferedSpecularContribution( i.worldPos, worldNormal, worldRefl, _PhongExponent );
 						#endif
 					#endif
 

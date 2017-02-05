@@ -55,6 +55,7 @@
      <None Include="Assets\PAL\Resources\Shaders\PALOpaque.shader" />
      <None Include="Assets\PAL\Resources\Shaders\PAL.cginc" />
      <None Include="Assets\PAL\Resources\Shaders\PALDeferredLighting.shader" />
+     <None Include="Assets\PAL\Resources\Shaders\PALSpecularBuffer.shader" />
      <None Include="Assets\PAL\Resources\Shaders\PALGeometryBuffer.shader" />
  <Reference Include="UnityEditor.Advertisements">
  <HintPath>C:/Program Files/Unity/Editor/Data/UnityExtensions/Unity/Advertisements/Editor/UnityEditor.Advertisements.dll</HintPath>

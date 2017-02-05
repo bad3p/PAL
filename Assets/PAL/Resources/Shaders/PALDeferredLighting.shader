@@ -69,7 +69,7 @@ Shader "Hidden/PALDeferredLighting"
 				ind.specular = 0;
 
     			half4 res = UNITY_BRDF_PBS (baseColor, specColor, oneMinusReflectivity, oneMinusRoughness, normalWorld, -eyeVec, light, ind);
-    			res += PALDiffuseContribution( wpos, normalWorld );
+    			res.xyz += baseColor.xyz * PALDiffuseContribution( wpos, normalWorld ).xyz;
 
 				return res;
 			}

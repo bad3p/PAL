@@ -36,18 +36,24 @@ public class PolygonalAreaLight
 	public ProjectionMode ProjectionMode = ProjectionMode.Centered;
 	public Vector3[] Vertices = new Vector3[0];
 	public int BatchIndex = 0;
+	public Vector4 SpecularBufferUVData = Vector4.zero;
 };
 
 static public class PALBatchBuilder
 {
 	#region Interface
 	private static List<PolygonalAreaLight> _polygonalAreaLights = null;
+	private static Material      _specularBufferMaterial = null;
+	private static RenderTexture _specularBuffer = null;
 
 	public static void RegisterPolygonalAreaLight(PolygonalAreaLight polygonalAreaLight)
 	{
 		if( _polygonalAreaLights == null )
 		{
 			_polygonalAreaLights = new List<PolygonalAreaLight>();
+			_specularBufferMaterial = new Material( Shader.Find( "Hidden/PALSpecularBuffer" ) );
+			_specularBuffer = new RenderTexture( 256, 256, 0, RenderTextureFormat.RFloat, RenderTextureReadWrite.Linear );
+			_specularBuffer.generateMips = false;
 		}
 
 		if( _polygonalAreaLights.Contains( polygonalAreaLight ) )
@@ -74,6 +80,9 @@ static public class PALBatchBuilder
 		if( _polygonalAreaLights.Count == 0 )
 		{
 			_polygonalAreaLights = null;
+			_specularBuffer.Release();
+			_specularBuffer = null;
+			_specularBufferMaterial = null;
 		}
 	}
 	#endregion
@@ -84,6 +93,9 @@ static public class PALBatchBuilder
 	static public int NumPolygons { get; private set; }
 	static public int NumVertices { get; private set; }
 	static public int BufferSize { get; private set; }
+	static public int MaxNumPolygons { get { return _polygonalAreaLights.Count; } }
+	static public Material SpecularBufferMaterial { get { return _specularBufferMaterial; } }
+	static public RenderTexture SpecularBuffer { get { return _specularBuffer; } }
 
 	static int                 _lastFrameCount = -1;
 	static int                 _numAreaLightsUpdated = 0;
@@ -143,6 +155,10 @@ static public class PALBatchBuilder
 		{
 			_lastFrameCount = Time.frameCount;
 			_numAreaLightsUpdated = 1;
+
+			RenderTexture.active = _specularBuffer;
+			GL.Clear( true, true, Color.black );
+			RenderTexture.active = null;
 		}
 		else
 		{
@@ -181,6 +197,8 @@ static public class PALBatchBuilder
 				polygonalAreaLight.BatchIndex = 0;
 			}
 		}
+
+		int specularBufferRowCapacity = Mathf.CeilToInt( Mathf.Sqrt( (float)(NumPolygons) ) );
 
 		int vertexBufferOffset = 0;
 
@@ -222,7 +240,7 @@ static public class PALBatchBuilder
 			}
 
 			// descriptor
-			_polygonBuffer[batchIndex*8].Set(
+			_polygonBuffer[batchIndex*9].Set(
 				vertexBufferOffset, 
 				vertexBufferOffset + polygonalAreaLight.Vertices.Length,
 				polygonalAreaLight.Intensity,
@@ -232,16 +250,22 @@ static public class PALBatchBuilder
 			// precalculated data
 			Vector3 circumcenterOffset = polygonalAreaLight.Circumcircle;
 			circumcenterOffset = circumcenterOffset - polygonalAreaLight.Vertices[0];
-			_polygonBuffer[batchIndex*8+1] = polygonalAreaLight.Color;
-			_polygonBuffer[batchIndex*8+2] = polygonalAreaLight.Normal;
-			_polygonBuffer[batchIndex*8+2].w = -Vector3.Dot( polygonalAreaLight.Normal, polygonalAreaLight.Vertices[0] );
-			_polygonBuffer[batchIndex*8+3] = tangent;
-			_polygonBuffer[batchIndex*8+4] = bitangent;
-			_polygonBuffer[batchIndex*8+5] = polygonalAreaLight.Centroid;
-			_polygonBuffer[batchIndex*8+6] = polygonalAreaLight.Circumcircle;
-			_polygonBuffer[batchIndex*8+7].x = Vector3.Dot( tangent, circumcenterOffset );
-			_polygonBuffer[batchIndex*8+7].y = Vector3.Dot( bitangent, circumcenterOffset );
-			_polygonBuffer[batchIndex*8+7].z = polygonalAreaLight.Circumcircle.w;
+			_polygonBuffer[batchIndex*9+1] = polygonalAreaLight.Color;
+			_polygonBuffer[batchIndex*9+2] = polygonalAreaLight.Normal;
+			_polygonBuffer[batchIndex*9+2].w = -Vector3.Dot( polygonalAreaLight.Normal, polygonalAreaLight.Vertices[0] );
+			_polygonBuffer[batchIndex*9+3] = tangent;
+			_polygonBuffer[batchIndex*9+4] = bitangent;
+			_polygonBuffer[batchIndex*9+5] = polygonalAreaLight.Centroid;
+			_polygonBuffer[batchIndex*9+6] = polygonalAreaLight.Circumcircle;
+			_polygonBuffer[batchIndex*9+7].x = Vector3.Dot( tangent, circumcenterOffset );
+			_polygonBuffer[batchIndex*9+7].y = Vector3.Dot( bitangent, circumcenterOffset );
+			_polygonBuffer[batchIndex*9+7].z = polygonalAreaLight.Circumcircle.w;
+
+			int cellX = batchIndex % specularBufferRowCapacity;
+			int cellY = batchIndex / specularBufferRowCapacity;
+			float cellSize = 1.0f / specularBufferRowCapacity;
+			polygonalAreaLight.SpecularBufferUVData.Set( cellX*cellSize, cellY*cellSize, cellSize, cellSize );
+			_polygonBuffer[batchIndex*9+8] = polygonalAreaLight.SpecularBufferUVData;
 
 			vertexBufferOffset += polygonalAreaLight.Vertices.Length;
 			batchIndex++;
@@ -249,6 +273,7 @@ static public class PALBatchBuilder
 
 		_bufferSizes.Set( NumPolygons, NumVertices, 0, 0 );
 		Shader.SetGlobalVector( "_PALBufferSizes", _bufferSizes );
+		Shader.SetGlobalTexture( "_PALSpecularBuffer", _specularBuffer );
 
 		#if UNITY_5_4_OR_NEWER
 			Shader.SetGlobalVectorArray( "_PALPolygonBuffer", _polygonBuffer );
@@ -372,11 +397,12 @@ static public class PALBatchBuilder
 			_polygonBuffer[7].x = Vector3.Dot( tangent, circumcenterOffset );
 			_polygonBuffer[7].y = Vector3.Dot( bitangent, circumcenterOffset );
 			_polygonBuffer[7].z = polygonalAreaLight.Circumcircle.w;
-
+			_polygonBuffer[8].Set( 0,0,1,1 );
 		}
 
 		_bufferSizes.Set( 1, polygonalAreaLight.Vertices.Length, 0, 0 );
 		Shader.SetGlobalVector( "_PALBufferSizes", _bufferSizes );
+		Shader.SetGlobalTexture( "_PALSpecularBuffer", _specularBuffer );
 
 		#if UNITY_5_4_OR_NEWER
 			Shader.SetGlobalVectorArray( "_PALPolygonBuffer", _polygonBuffer );

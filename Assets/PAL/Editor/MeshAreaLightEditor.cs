@@ -45,6 +45,8 @@ public class MeshAreaLightEditor : Editor
 		EditorGUILayout.LabelField( "Num polygons: " + PALBatchBuilder.NumPolygons );
 		EditorGUILayout.LabelField( "Num vertices: " + PALBatchBuilder.NumVertices );
 		EditorGUILayout.LabelField( "Buffer size: " + PALBatchBuilder.BufferSize + "/" + PALBatchBuilder.ShaderConstantBufferSize );
+		EditorGUILayout.LabelField( "Specular buffer:" );
+		EditorGUILayout.ObjectField( PALBatchBuilder.SpecularBuffer, typeof(RenderTexture), true, new GUILayoutOption[0] );
 
 		DrawDefaultInspector();
 

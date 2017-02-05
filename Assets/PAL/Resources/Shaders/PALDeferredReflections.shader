@@ -95,7 +95,9 @@ half4 frag (unity_v2f_deferred i) : SV_Target
 	half4 res = half4(rgb, falloff);
 
 	float3 worldRefl = reflect( -eyeVec, worldNormal );
-	res.xyz += PALSpecularContribution( worldPos, worldRefl );
+
+	//res.xyz += PALSpecularContribution( worldPos, worldRefl );
+	res.xyz += (1-oneMinusReflectivity) * PALBufferedSpecularContribution( worldPos, worldNormal, worldRefl, oneMinusRoughness*100 );
 
 	return res;
 }

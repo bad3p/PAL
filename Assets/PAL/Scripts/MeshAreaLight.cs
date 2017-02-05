@@ -116,6 +116,18 @@ public class MeshAreaLight : MonoBehaviour
 
 		UpdatePolygonalAreaLight();
 		PALBatchBuilder.Update( _polygonalAreaLight );
+
+		if( PALBatchBuilder.SpecularBuffer && PALBatchBuilder.SpecularBufferMaterial )
+		{
+			int rowCapacity = Mathf.CeilToInt( Mathf.Sqrt( (float)(PALBatchBuilder.MaxNumPolygons) ) );
+			int cellX = _polygonalAreaLight.BatchIndex % rowCapacity;
+			int cellY = _polygonalAreaLight.BatchIndex / rowCapacity;
+			float cellSize = 1.0f / rowCapacity;
+
+			PALBatchBuilder.SpecularBufferMaterial.SetInt( "_PolygonIndex", _polygonalAreaLight.BatchIndex );
+			PALBatchBuilder.SpecularBufferMaterial.SetVector( "_UVOriginAndSize", _polygonalAreaLight.SpecularBufferUVData );
+			Graphics.Blit( null, PALBatchBuilder.SpecularBuffer, PALBatchBuilder.SpecularBufferMaterial );
+		}
 	}
 
 	void OnDrawGizmos() 

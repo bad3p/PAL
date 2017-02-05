@@ -1,11 +1,11 @@
 ﻿<Properties StartupItem="Assembly-CSharp.csproj">
   <MonoDevelop.Ide.Workspace ActiveConfiguration="Debug" PreferredExecutionTarget="Unity.Instance.Unity Editor" />
-  <MonoDevelop.Ide.Workbench ActiveDocument="Assets\PAL\Resources\Shaders\PAL.cginc">
+  <MonoDevelop.Ide.Workbench ActiveDocument="Assets\PAL\Resources\Shaders\PALDeferredReflections.shader">
     <Files>
-      <File FileName="Assets\PAL\Scripts\IrradianceTransfer.cs" Line="358" Column="65" />
-      <File FileName="Assets\PAL\Resources\Shaders\PALNormalBuffer.shader" Line="24" Column="9" />
-      <File FileName="Assets\PAL\Resources\Shaders\PALDeferredLighting.shader" Line="72" Column="37" />
-      <File FileName="Assets\PAL\Resources\Shaders\PAL.cginc" Line="172" Column="52" />
+      <File FileName="Assets\PAL\Resources\Shaders\PAL.cginc" Line="457" Column="5" />
+      <File FileName="Assets\PAL\Resources\Shaders\PALOpaque.shader" Line="186" Column="105" />
+      <File FileName="Assets\PAL\Resources\Shaders\PALDeferredReflections.shader" Line="100" Column="37" />
+      <File FileName="Assets\PAL\Resources\Shaders\PALDeferredLighting.shader" Line="72" Column="35" />
     </Files>
   </MonoDevelop.Ide.Workbench>
   <MonoDevelop.Ide.DebuggingService.Breakpoints>
