@@ -454,7 +454,7 @@ float4 PALBufferedSpecularContribution(float3 worldPos, float3 worldNormal, floa
 				float2 specularUVs = polygonSpecularUVs.xy + polygonSpecularUVs.zw * 0.5 + localPoint * ( polygonSpecularUVs.zw * 0.5 );
 				float dist = tex2D( _PALSpecularBuffer, specularUVs );
 
-				specularColor = polygonColor * fadeFactor * 1.0 / pow( ( dist + 1 ), phongExponent );
+				specularColor += polygonColor * fadeFactor * 1.0 / pow( ( dist + 1 ), phongExponent );
 			}
         }
 	}
