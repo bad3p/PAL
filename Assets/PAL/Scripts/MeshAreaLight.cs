@@ -119,11 +119,6 @@ public class MeshAreaLight : MonoBehaviour
 
 		if( PALBatchBuilder.SpecularBuffer && PALBatchBuilder.SpecularBufferMaterial )
 		{
-			int rowCapacity = Mathf.CeilToInt( Mathf.Sqrt( (float)(PALBatchBuilder.MaxNumPolygons) ) );
-			int cellX = _polygonalAreaLight.BatchIndex % rowCapacity;
-			int cellY = _polygonalAreaLight.BatchIndex / rowCapacity;
-			float cellSize = 1.0f / rowCapacity;
-
 			PALBatchBuilder.SpecularBufferMaterial.SetInt( "_PolygonIndex", _polygonalAreaLight.BatchIndex );
 			PALBatchBuilder.SpecularBufferMaterial.SetVector( "_UVOriginAndSize", _polygonalAreaLight.SpecularBufferUVData );
 			Graphics.Blit( null, PALBatchBuilder.SpecularBuffer, PALBatchBuilder.SpecularBufferMaterial );
@@ -145,6 +140,7 @@ public class MeshAreaLight : MonoBehaviour
 		_polygonalAreaLight.Color = this.Color;
 		_polygonalAreaLight.Intensity = this.Intensity;
 		_polygonalAreaLight.Bias = this.Bias;
+		_polygonalAreaLight.Specular = true;
 		_polygonalAreaLight.ProjectionMode = this.ProjectionMode;
 
 		if( _polygonalAreaLight.Vertices.Length < this.Vertices.Length )

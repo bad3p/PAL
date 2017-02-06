@@ -277,6 +277,7 @@ public partial class IrradianceTransfer : MonoBehaviour
 						if( irradiancePolygon == null )
 						{
 							irradiancePolygon = new IrradiancePolygon();
+							irradiancePolygon.Specular = false;
 							irradiancePolygon.polygonIndex = polygonIndex;
 							_irradiancePolygons[polygonIndex] = irradiancePolygon;
 						}

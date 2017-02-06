@@ -30,6 +30,7 @@ public class PolygonalAreaLight
 	public Color Color = Color.black;
 	public float Intensity = 0.0f;
 	public float Bias = 0.0f;
+	public bool Specular = false;
 	public Vector3 Normal = Vector3.zero;
 	public Vector3 Centroid = Vector3.zero;
 	public Vector4 Circumcircle = Vector4.zero;
@@ -52,7 +53,7 @@ static public class PALBatchBuilder
 		{
 			_polygonalAreaLights = new List<PolygonalAreaLight>();
 			_specularBufferMaterial = new Material( Shader.Find( "Hidden/PALSpecularBuffer" ) );
-			_specularBuffer = new RenderTexture( 256, 256, 0, RenderTextureFormat.RFloat, RenderTextureReadWrite.Linear );
+			_specularBuffer = new RenderTexture( 512, 512, 0, RenderTextureFormat.RFloat, RenderTextureReadWrite.Linear );
 			_specularBuffer.generateMips = false;
 		}
 
@@ -175,6 +176,8 @@ static public class PALBatchBuilder
 			return;
 		}
 
+		int numSpecularPolygons = 0;
+
 		NumPolygons = 0;
 		NumVertices = 0;
 		BufferSize = 0;
@@ -187,6 +190,10 @@ static public class PALBatchBuilder
 			int requiredBufferSize = 5 + polygonalAreaLight.Vertices.Length;
 			if( BufferSize + requiredBufferSize < ShaderConstantBufferSize )
 			{
+				if( polygonalAreaLight.Specular ) 
+				{
+					numSpecularPolygons++;
+				}
 				NumPolygons++;
 				NumVertices += polygonalAreaLight.Vertices.Length;
 				BufferSize += requiredBufferSize;
@@ -198,11 +205,12 @@ static public class PALBatchBuilder
 			}
 		}
 
-		int specularBufferRowCapacity = Mathf.CeilToInt( Mathf.Sqrt( (float)(NumPolygons) ) );
+		int specularBufferRowCapacity = Mathf.CeilToInt( Mathf.Sqrt( (float)(numSpecularPolygons) ) );
 
 		int vertexBufferOffset = 0;
 
 		int batchIndex = 0;
+		int specularIndex = 0;
 		for( int k=0; k<_polygonalAreaLights.Count; k++ )
 		{
 			PolygonalAreaLight polygonalAreaLight = _polygonalAreaLights[k];
@@ -261,11 +269,19 @@ static public class PALBatchBuilder
 			_polygonBuffer[batchIndex*9+7].y = Vector3.Dot( bitangent, circumcenterOffset );
 			_polygonBuffer[batchIndex*9+7].z = polygonalAreaLight.Circumcircle.w;
 
-			int cellX = batchIndex % specularBufferRowCapacity;
-			int cellY = batchIndex / specularBufferRowCapacity;
-			float cellSize = 1.0f / specularBufferRowCapacity;
-			polygonalAreaLight.SpecularBufferUVData.Set( cellX*cellSize, cellY*cellSize, cellSize, cellSize );
-			_polygonBuffer[batchIndex*9+8] = polygonalAreaLight.SpecularBufferUVData;
+			if( polygonalAreaLight.Specular )
+			{
+				int cellX = specularIndex % specularBufferRowCapacity;
+				int cellY = specularIndex / specularBufferRowCapacity;
+				float cellSize = 1.0f / specularBufferRowCapacity;
+				polygonalAreaLight.SpecularBufferUVData.Set( cellX*cellSize, cellY*cellSize, cellSize, cellSize );
+				_polygonBuffer[batchIndex*9+8] = polygonalAreaLight.SpecularBufferUVData;
+				specularIndex++;
+			}
+			else
+			{
+				_polygonBuffer[batchIndex*9+8].Set( 0,0,0,0 );
+			}
 
 			vertexBufferOffset += polygonalAreaLight.Vertices.Length;
 			batchIndex++;

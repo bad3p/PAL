@@ -425,36 +425,39 @@ float4 PALBufferedSpecularContribution(float3 worldPos, float3 worldNormal, floa
 
 	for( int i=0; i<numPolygons; i++ )
 	{
-		float4 polygonDesc = PAL_POLYGON_DESC(i);
-		float4 polygonColor = PAL_POLYGON_COLOR(i);
-		float4 polygonNormal = PAL_POLYGON_NORMAL(i);
-		float4 polygonCentroid = PAL_POLYGON_CENTROID(i);
-		float4 polygonTangent = PAL_POLYGON_TANGENT(i);
-		float4 polygonBitangent = PAL_POLYGON_BITANGENT(i);
-		float4 polygonCircumcircle = PAL_POLYGON_CIRCUMCIRCLE(i);
 		float4 polygonSpecularUVs = PAL_POLYGON_SPECULAR_UVS(i);
-		float intensity = polygonDesc.z;
-
-		float3 worldPosToPolygonDir = polygonCentroid.xyz - worldPos;
-
-		if( dot( polygonNormal.xyz, worldRefl ) > 0 && dot( polygonNormal.xyz, worldPosToPolygonDir ) < 0 )
+		if( dot( polygonSpecularUVs.zw, polygonSpecularUVs.zw ) > 0 )
 		{
-			float3 intersectionPoint = RayPlaneIntersection( polygonNormal, polygonCircumcircle.xyz, worldPos, worldRefl );
-			float3 intersectionOffset = intersectionPoint - polygonCircumcircle.xyz;
-			float intersectionDist = length( intersectionOffset );
+			float4 polygonDesc = PAL_POLYGON_DESC(i);
+			float4 polygonColor = PAL_POLYGON_COLOR(i);
+			float4 polygonNormal = PAL_POLYGON_NORMAL(i);
+			float4 polygonCentroid = PAL_POLYGON_CENTROID(i);
+			float4 polygonTangent = PAL_POLYGON_TANGENT(i);
+			float4 polygonBitangent = PAL_POLYGON_BITANGENT(i);
+			float4 polygonCircumcircle = PAL_POLYGON_CIRCUMCIRCLE(i);
+			float intensity = polygonDesc.z;
 
-			if( intersectionDist < ( 3 * polygonCircumcircle.w ) )
+			float3 worldPosToPolygonDir = polygonCentroid.xyz - worldPos;
+
+			if( dot( polygonNormal.xyz, worldRefl ) > 0 && dot( polygonNormal.xyz, worldPosToPolygonDir ) < 0 )
 			{
-				float2 localPoint = float2( dot( polygonTangent, intersectionOffset ), dot( polygonBitangent, intersectionOffset ) );
-				localPoint *= 1.0 / ( 3 * polygonCircumcircle.w );
-				float2 specularUVs = polygonSpecularUVs.xy + polygonSpecularUVs.zw * 0.5 + localPoint * ( polygonSpecularUVs.zw * 0.5 );
-				float dist = tex2D( _PALSpecularBuffer, specularUVs );
+				float3 intersectionPoint = RayPlaneIntersection( polygonNormal, polygonCircumcircle.xyz, worldPos, worldRefl );
+				float3 intersectionOffset = intersectionPoint - polygonCircumcircle.xyz;
+				float intersectionDist = length( intersectionOffset );
 
-				float fadeFactor0 = saturate( 1 / distance( intersectionPoint, worldPos ) );
-				float fadeFactor1 = 1 - intersectionDist / ( 3 * polygonCircumcircle.w );
-				float fadeFactor = fadeFactor0 * fadeFactor1;
+				if( intersectionDist < ( 3 * polygonCircumcircle.w ) )
+				{
+					float2 localPoint = float2( dot( polygonTangent, intersectionOffset ), dot( polygonBitangent, intersectionOffset ) );
+					localPoint *= 1.0 / ( 3 * polygonCircumcircle.w );
+					float2 specularUVs = polygonSpecularUVs.xy + polygonSpecularUVs.zw * 0.5 + localPoint * ( polygonSpecularUVs.zw * 0.5 );
+					float dist = tex2D( _PALSpecularBuffer, specularUVs );
 
-				specularColor += polygonColor * fadeFactor * 1.0 / pow( ( dist + 1 ), phongExponent );
+					float fadeFactor0 = saturate( 1 / distance( intersectionPoint, worldPos ) );
+					float fadeFactor1 = 1 - intersectionDist / ( 3 * polygonCircumcircle.w );
+					float fadeFactor = fadeFactor0 * fadeFactor1;
+
+					specularColor += polygonColor * fadeFactor * 1.0 / pow( ( dist + 1 ), phongExponent );
+				}
 			}
         }
 	}
