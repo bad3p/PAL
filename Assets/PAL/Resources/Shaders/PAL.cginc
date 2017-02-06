@@ -445,14 +445,15 @@ float4 PALBufferedSpecularContribution(float3 worldPos, float3 worldNormal, floa
 
 			if( intersectionDist < ( 3 * polygonCircumcircle.w ) )
 			{
-				float fadeFactor0 = saturate( 1 / distance( intersectionPoint, worldPos ) );
-				float fadeFactor1 = 1 - intersectionDist / ( 3 * polygonCircumcircle.w );
-				float fadeFactor = fadeFactor0 * fadeFactor1;
-
 				float2 localPoint = float2( dot( polygonTangent, intersectionOffset ), dot( polygonBitangent, intersectionOffset ) );
 				localPoint *= 1.0 / ( 3 * polygonCircumcircle.w );
 				float2 specularUVs = polygonSpecularUVs.xy + polygonSpecularUVs.zw * 0.5 + localPoint * ( polygonSpecularUVs.zw * 0.5 );
 				float dist = tex2D( _PALSpecularBuffer, specularUVs );
+
+				float fadeFactor0 = saturate( 1 / distance( intersectionPoint, worldPos ) );
+				float fadeFactor1 = 1 - intersectionDist / ( 3 * polygonCircumcircle.w );
+				fadeFactor1 = lerp( 1, fadeFactor1, 1-step( dist, 0 ) );
+				float fadeFactor = fadeFactor0 * fadeFactor1;
 
 				specularColor += polygonColor * fadeFactor * 1.0 / pow( ( dist + 1 ), phongExponent );
 			}
