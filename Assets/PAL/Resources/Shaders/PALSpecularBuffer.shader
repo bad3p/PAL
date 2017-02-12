@@ -25,7 +25,7 @@ Shader "Hidden/PALSpecularBuffer"
 {   
 	Properties 
 	{
-		_PolygonIndex ( "PolygonIndex", Int ) = 0
+		_PolygonIndex ( "PolygonIndex", int ) = 0
 		_UVOriginAndSize ("UVOriginAndSize", Vector ) = (0,0,1,1)
 	}
 	
@@ -109,7 +109,7 @@ Shader "Hidden/PALSpecularBuffer"
 				int firstVertexIndex = (int)polygonDesc.x;
 				int lastVertexIndex = (int)polygonDesc.y;
 
-				float2 localPoint = localNormalizedCoords * polygonCircumcircle.w * 3; // TODO: configure
+				float2 localPoint = localNormalizedCoords * ( polygonCircumcircle.w * _PALPhi );
 
 				// http://geomalgorithms.com/a03-_inclusion.html
 				uint crossingNumber = 0;
@@ -247,7 +247,7 @@ Shader "Hidden/PALSpecularBuffer"
 				int firstVertexIndex = (int)polygonDesc.x;
 				int lastVertexIndex = (int)polygonDesc.y;
 
-				float2 localPoint = localNormalizedCoords * polygonCircumcircle.w * 3; // TODO: configure
+				float2 localPoint = localNormalizedCoords * ( polygonCircumcircle.w * _PALPhi );
 
 				// http://geomalgorithms.com/a03-_inclusion.html
 				uint crossingNumber = 0;

@@ -53,7 +53,7 @@ static public class PALBatchBuilder
 		{
 			_polygonalAreaLights = new List<PolygonalAreaLight>();
 			_specularBufferMaterial = new Material( Shader.Find( "Hidden/PALSpecularBuffer" ) );
-			_specularBuffer = new RenderTexture( 512, 512, 0, RenderTextureFormat.RFloat, RenderTextureReadWrite.Linear );
+			_specularBuffer = new RenderTexture( 2048, 2048, 0, RenderTextureFormat.RFloat, RenderTextureReadWrite.Linear );
 			_specularBuffer.generateMips = false;
 		}
 
@@ -89,6 +89,8 @@ static public class PALBatchBuilder
 	#endregion
 
 	#region BatchBuilder
+	const float PALPhi = 2.0f;
+
 	static public int MaxNumPolygons 
 	{
 		get 
@@ -247,19 +249,22 @@ static public class PALBatchBuilder
 				_dxVertexBuffer[vertexBufferOffset+j] = polygonalAreaLight.Vertices[j];
 
 				int compressedIndex = (vertexBufferOffset+j)/2;
-				Vector3 vertexOriginOffset = polygonalAreaLight.Vertices[j] - circumcenter;
-				Vector2 planarVertexCoords = new Vector2( Vector3.Dot( vertexOriginOffset, tangent ), Vector3.Dot( vertexOriginOffset, bitangent ) );
-
-				switch( (vertexBufferOffset+j) % 2 )
+				if( compressedIndex < _glVertexBuffer.Length )
 				{
-				case 0:
-					_glVertexBuffer[compressedIndex].x = planarVertexCoords.x;
-					_glVertexBuffer[compressedIndex].y = planarVertexCoords.y;
-					break;
-				default:
-					_glVertexBuffer[compressedIndex].z = planarVertexCoords.x;
-					_glVertexBuffer[compressedIndex].w = planarVertexCoords.y;
-					break;
+					Vector3 vertexOriginOffset = polygonalAreaLight.Vertices[j] - circumcenter;
+					Vector2 planarVertexCoords = new Vector2( Vector3.Dot( vertexOriginOffset, tangent ), Vector3.Dot( vertexOriginOffset, bitangent ) );
+
+					switch( (vertexBufferOffset+j) % 2 )
+					{
+					case 0:
+						_glVertexBuffer[compressedIndex].x = planarVertexCoords.x;
+						_glVertexBuffer[compressedIndex].y = planarVertexCoords.y;
+						break;
+					default:
+						_glVertexBuffer[compressedIndex].z = planarVertexCoords.x;
+						_glVertexBuffer[compressedIndex].w = planarVertexCoords.y;
+						break;
+					}
 				}
 			}
 
@@ -312,6 +317,7 @@ static public class PALBatchBuilder
 
 		Shader.SetGlobalInt( "_PALNumPolygons", NumPolygons );
 		Shader.SetGlobalInt( "_PALNumVertices", NumVertices );
+		Shader.SetGlobalFloat( "_PALPhi", PALPhi );
 		Shader.SetGlobalTexture( "_PALSpecularBuffer", _specularBuffer );
 
 		#if UNITY_5_4_OR_NEWER
@@ -379,19 +385,22 @@ static public class PALBatchBuilder
 				_dxVertexBuffer[j] = polygonalAreaLight.Vertices[j];
 
 				int compressedIndex = j/2;
-				Vector3 vertexOriginOffset = polygonalAreaLight.Vertices[j] - circumcenter;
-				Vector2 planarVertexCoords = new Vector2( Vector3.Dot( vertexOriginOffset, tangent ), Vector3.Dot( vertexOriginOffset, bitangent ) );
-
-				switch( j % 2 )
+				if( compressedIndex < _glVertexBuffer.Length )
 				{
-				case 0:
-					_glVertexBuffer[compressedIndex].x = planarVertexCoords.x;
-					_glVertexBuffer[compressedIndex].y = planarVertexCoords.y;
-					break;
-				default:
-					_glVertexBuffer[compressedIndex].z = planarVertexCoords.x;
-					_glVertexBuffer[compressedIndex].w = planarVertexCoords.y;
-					break;
+					Vector3 vertexOriginOffset = polygonalAreaLight.Vertices[j] - circumcenter;
+					Vector2 planarVertexCoords = new Vector2( Vector3.Dot( vertexOriginOffset, tangent ), Vector3.Dot( vertexOriginOffset, bitangent ) );
+
+					switch( j % 2 )
+					{
+					case 0:
+						_glVertexBuffer[compressedIndex].x = planarVertexCoords.x;
+						_glVertexBuffer[compressedIndex].y = planarVertexCoords.y;
+						break;
+					default:
+						_glVertexBuffer[compressedIndex].z = planarVertexCoords.x;
+						_glVertexBuffer[compressedIndex].w = planarVertexCoords.y;
+						break;
+					}
 				}
 			}
 
@@ -428,6 +437,7 @@ static public class PALBatchBuilder
 
 		Shader.SetGlobalInt( "_PALNumPolygons", 1 );
 		Shader.SetGlobalInt( "_PALNumVertices", polygonalAreaLight.Vertices.Length );
+		Shader.SetGlobalFloat( "_PALPhi", PALPhi );
 		Shader.SetGlobalTexture( "_PALSpecularBuffer", _specularBuffer );
 
 		#if UNITY_5_4_OR_NEWER
