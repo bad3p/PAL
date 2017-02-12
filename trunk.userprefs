@@ -1,10 +1,11 @@
 ﻿<Properties StartupItem="Assembly-CSharp.csproj">
   <MonoDevelop.Ide.Workspace ActiveConfiguration="Debug" PreferredExecutionTarget="Unity.Instance.Unity Editor" />
-  <MonoDevelop.Ide.Workbench ActiveDocument="Assets\PAL\Resources\Shaders\PALSpecularBuffer.shader">
+  <MonoDevelop.Ide.Workbench ActiveDocument="Assets\PAL\Resources\Shaders\PALGL.cginc">
     <Files>
-      <File FileName="Assets\PAL\Resources\Shaders\PALOpaque.shader" Line="299" Column="1" />
-      <File FileName="Assets\PAL\Resources\Shaders\PAL.cginc" Line="248" Column="58" />
-      <File FileName="Assets\PAL\Resources\Shaders\PALSpecularBuffer.shader" Line="126" Column="1" />
+      <File FileName="Assets\PAL\Resources\Shaders\PALOpaque.shader" Line="144" Column="1" />
+      <File FileName="Assets\PAL\Resources\Shaders\PALGL.cginc" Line="251" Column="49" />
+      <File FileName="Assets\PAL\Resources\Shaders\PAL.cginc" Line="239" Column="37" />
+      <File FileName="Assets\PAL\Resources\Shaders\PALSpecularBuffer.shader" Line="261" Column="59" />
     </Files>
   </MonoDevelop.Ide.Workbench>
   <MonoDevelop.Ide.DebuggingService.Breakpoints>

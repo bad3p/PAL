@@ -250,7 +250,7 @@ float4 PALBufferedSpecularContribution(float3 worldPos, float3 worldNormal, floa
 					float fadeFactor1 = 1 - intersectionDist / ( _PALPhi * polygonCircumcircle.w );
 					float fadeFactor = fadeFactor0 * fadeFactor1;
 
-					specularColor += polygonColor * fadeFactor * 1.0 / pow( ( normalizedDist + 1 ), phongExponent );
+					specularColor += polygonColor * intensity * fadeFactor * 1.0 / pow( ( normalizedDist + 1 ), phongExponent );
 				}
 			}
         }
