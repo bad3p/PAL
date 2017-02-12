@@ -5,8 +5,24 @@ Supported APIs:
 
 <table>
     <tr>
+	<td></td>
         <td>DirectX 11, DirectX 12</td>
         <td>OpenGL, OpenGL ES3, OpenGL ES2</td>
+    </tr>
+    <tr>
+	<td>Rendering path</td>
+        <td>Forward, Deferred</td>
+        <td>Forward</td>
+    </tr>
+    <tr>
+	<td>Number of light sources</td>
+        <td>127</td>
+        <td>66</td>
+    </tr>
+    <tr>
+	<td>Number of vertices</td>
+        <td>1023</td>
+        <td>198</td>
     </tr>
 </table>
 
