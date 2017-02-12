@@ -12,7 +12,7 @@ Supported APIs:
     <tr>
 	<td>Rendering path</td>
         <td>Forward, Deferred</td>
-        <td>Forward</td>
+        <td>Forward, Deferred</td>
     </tr>
     <tr>
 	<td>Number of light sources</td>
