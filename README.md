@@ -1,10 +1,16 @@
-# REAL-TIME IRRADIANCE TRANSFER
 
-![Example](https://github.com/bad3p/PAL/blob/master/Docs/Images/IrradiancePolygons.jpg?raw=true)
+# PAL PROJECT
 
-Work still in progress. I have implemented marching squares and polygon processing in ComputeShader.
+Supported APIs:
 
-# POLYGONAL AREA LIGHTS.
+<table>
+    <tr>
+        <td>DirectX 11, DirectX 12</td>
+        <td>OpenGL, OpenGL ES3, OpenGL ES2</td>
+    </tr>
+</table>
+
+# POLYGONAL AREA LIGHTS
 
 ![Example](https://media.licdn.com/mpr/mpr/AAEAAQAAAAAAAAfcAAAAJDQ5MGQyNzE4LTk3NDYtNDRiOS1hZTMxLTNiNWY2ZmJlN2NkYw.png)
 
