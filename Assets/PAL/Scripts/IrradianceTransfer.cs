@@ -379,7 +379,7 @@ public partial class IrradianceTransfer : MonoBehaviour
 		_geometryBuffer.filterMode = FilterMode.Point;
 		_illuminationBuffer.filterMode = FilterMode.Point;
 
-		_offscreenCamera.nearClipPlane = 0.1f;
+		_offscreenCamera.nearClipPlane = 0.05f;
 		_offscreenCamera.farClipPlane = 50.0f;
 		_offscreenCamera.fieldOfView = OffscreenCameraFOV;
 		_offscreenCamera.enabled = false;
@@ -472,7 +472,15 @@ public partial class IrradianceTransfer : MonoBehaviour
 		#else
 			if( SystemInfo.supportsComputeShaders )
 			{
-				MarchingSquaresGPU( marchingSquaresInf, marchingSquaresSup );
+				if( SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Direct3D11 ||
+					SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Direct3D12 )
+				{
+					MarchingSquaresGPU( marchingSquaresInf, marchingSquaresSup );
+				}
+				else
+				{
+					MarchingSquaresCPU( marchingSquaresInf, marchingSquaresSup );
+				}
 			}
 			else
 			{
@@ -529,7 +537,6 @@ public partial class IrradianceTransfer : MonoBehaviour
 
 	void OnDrawGizmos()
 	{
-		return;
 		for( int polygonIndex=0; polygonIndex<_irradiancePolygons.Length; polygonIndex++ )
 		{
 			var irradiancePolygon = _irradiancePolygons[polygonIndex];

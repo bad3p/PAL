@@ -369,6 +369,7 @@ static public class PALBatchBuilder
 
 		if( polygonalAreaLight.Vertices.Length >= 3 )
 		{
+			Vector3 circumcenter = polygonalAreaLight.Circumcircle;
 			Vector3 tangent = new Vector3( polygonalAreaLight.Normal.y, polygonalAreaLight.Normal.z, -polygonalAreaLight.Normal.x );
 			Vector3 bitangent = Vector3.Cross( tangent, polygonalAreaLight.Normal ).normalized;
 			tangent = Vector3.Cross( polygonalAreaLight.Normal, bitangent ).normalized;
@@ -376,6 +377,22 @@ static public class PALBatchBuilder
 			for( int j=0; j<polygonalAreaLight.Vertices.Length; j++ )
 			{
 				_dxVertexBuffer[j] = polygonalAreaLight.Vertices[j];
+
+				int compressedIndex = j/2;
+				Vector3 vertexOriginOffset = polygonalAreaLight.Vertices[j] - circumcenter;
+				Vector2 planarVertexCoords = new Vector2( Vector3.Dot( vertexOriginOffset, tangent ), Vector3.Dot( vertexOriginOffset, bitangent ) );
+
+				switch( j % 2 )
+				{
+				case 0:
+					_glVertexBuffer[compressedIndex].x = planarVertexCoords.x;
+					_glVertexBuffer[compressedIndex].y = planarVertexCoords.y;
+					break;
+				default:
+					_glVertexBuffer[compressedIndex].z = planarVertexCoords.x;
+					_glVertexBuffer[compressedIndex].w = planarVertexCoords.y;
+					break;
+				}
 			}
 
 			// descriptor
@@ -397,15 +414,44 @@ static public class PALBatchBuilder
 			_dxPolygonBuffer[5] = polygonalAreaLight.Centroid;
 			_dxPolygonBuffer[6] = polygonalAreaLight.Circumcircle;
 			_dxPolygonBuffer[7].Set( 0,0,1,1 );
+
+			// gl-specific data
+			_glPolygonDesc[0] = _dxPolygonBuffer[0];
+			_glPolygonColor[0] = _dxPolygonBuffer[1];
+			_glPolygonNormal[0] = _dxPolygonBuffer[2];
+			_glPolygonTangent[0] = _dxPolygonBuffer[3];
+			_glPolygonBitangent[0] = _dxPolygonBuffer[4];
+			_glPolygonCentroid[0] = _dxPolygonBuffer[5];
+			_glPolygonCircumcircle[0] = _dxPolygonBuffer[6];
+			_glPolygonSpecularUV[0] = _dxPolygonBuffer[7];
 		}
 
-		Shader.SetGlobalInt( "_PALNumPolygons", NumPolygons );
-		Shader.SetGlobalInt( "_PALNumVertices", NumVertices );
+		Shader.SetGlobalInt( "_PALNumPolygons", 1 );
+		Shader.SetGlobalInt( "_PALNumVertices", polygonalAreaLight.Vertices.Length );
 		Shader.SetGlobalTexture( "_PALSpecularBuffer", _specularBuffer );
 
 		#if UNITY_5_4_OR_NEWER
-			Shader.SetGlobalVectorArray( "_PALPolygonBuffer", _dxPolygonBuffer );
-			Shader.SetGlobalVectorArray( "_PALVertexBuffer", _dxVertexBuffer );
+			switch( SystemInfo.graphicsDeviceType )
+			{
+			case UnityEngine.Rendering.GraphicsDeviceType.OpenGLCore:
+			case UnityEngine.Rendering.GraphicsDeviceType.OpenGL2:
+			case UnityEngine.Rendering.GraphicsDeviceType.OpenGLES2:
+			case UnityEngine.Rendering.GraphicsDeviceType.OpenGLES3:
+				Shader.SetGlobalVectorArray( "_PALPolygonDesc", _glPolygonDesc );
+				Shader.SetGlobalVectorArray( "_PALPolygonColor", _glPolygonColor );
+				Shader.SetGlobalVectorArray( "_PALPolygonNormal", _glPolygonNormal );
+				Shader.SetGlobalVectorArray( "_PALPolygonTangent", _glPolygonTangent );
+				Shader.SetGlobalVectorArray( "_PALPolygonBitangent", _glPolygonBitangent );
+				Shader.SetGlobalVectorArray( "_PALPolygonCentroid", _glPolygonCentroid );
+				Shader.SetGlobalVectorArray( "_PALPolygonCircumcircle", _glPolygonCircumcircle );
+				Shader.SetGlobalVectorArray( "_PALPolygonSpecularUV", _glPolygonSpecularUV );
+				Shader.SetGlobalVectorArray( "_PALVertexBuffer", _glVertexBuffer );
+				break;
+			default:
+				Shader.SetGlobalVectorArray( "_PALPolygonBuffer", _dxPolygonBuffer );
+				Shader.SetGlobalVectorArray( "_PALVertexBuffer", _dxVertexBuffer );
+				break;
+			}
 		#else
 			for( int i=0; i<NumPolygons; i++ )
 			{

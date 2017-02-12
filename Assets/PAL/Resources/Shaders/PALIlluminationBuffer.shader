@@ -47,10 +47,69 @@ Shader "Hidden/PALIlluminationBuffer"
 			#pragma vertex vert
 			#pragma fragment frag
 			#pragma fragmentoption ARB_precision_hint_fastest
-			#pragma exclude_renderers d3d11_9x 
+			#pragma exclude_renderers d3d11_9x glcore gles gles3 
 
 			#include "UnityCG.cginc"
 			#include "PAL.cginc"
+
+			float _IlluminationScale;
+
+			struct appdata 
+			{
+				float4 vertex : POSITION;
+				float3 normal : NORMAL;
+			};
+
+			struct v2f 
+			{
+				float4 pos         : SV_POSITION;
+				float3 worldPos    : TEXCOORD0;
+				float3 worldNormal : TEXCOORD1;
+			};
+
+			v2f vert (appdata v) 
+			{
+				v2f o;
+				o.pos = mul( UNITY_MATRIX_MVP, v.vertex );
+				o.worldPos = mul( unity_ObjectToWorld, v.vertex ).xyz;
+				o.worldNormal = mul( unity_ObjectToWorld, float4( v.normal, 0 ) ).xyz;
+				return o;
+			}
+
+			float4 frag (v2f i) : SV_Target  
+			{
+				float3 worldNormal = normalize( i.worldNormal );
+				float intensity = PALDiffuseIntensity( i.worldPos, worldNormal );
+				return EncodeFloatRGBA( clamp( intensity * _IlluminationScale, 0, 0.9999999 ) );
+			}
+			ENDCG
+		}
+	}
+
+	SubShader 
+	{
+		Tags { "Queue"="Geometry" "RenderType"="Opaque" }
+		LOD 100
+		ZTest Less
+		Cull Back
+		ZWrite On
+		Fog { Mode off }
+		
+		Pass
+		{
+			Name "ForwardBase" 
+			Tags { "LightMode"="ForwardBase" }
+			Blend One Zero
+    		
+			CGPROGRAM
+			#pragma target 3.0
+			#pragma vertex vert
+			#pragma fragment frag
+			#pragma fragmentoption ARB_precision_hint_fastest
+			#pragma only_renderers glcore gles gles3
+
+			#include "UnityCG.cginc"
+			#include "PALGL.cginc"
 
 			float _IlluminationScale;
 
