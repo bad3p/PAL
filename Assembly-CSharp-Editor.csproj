@@ -48,6 +48,7 @@
      <Compile Include="Assets\PAL\Editor\MeshAreaLightEditor.cs" />
      <None Include="Assets\PAL\Resources\Shaders\PALDepthBuffer.shader" />
      <None Include="Assets\PAL\Resources\Shaders\PALDeferredReflections.shader" />
+     <None Include="Assets\PAL\Resources\Shaders\PALGL.cginc" />
      <None Include="Assets\PAL\Resources\Shaders\PALIlluminationBuffer.shader" />
      <None Include="Assets\PAL\Resources\Shaders\PALMergeBuffer.shader" />
      <None Include="Assets\PAL\Resources\Shaders\PALNormalBuffer.shader" />

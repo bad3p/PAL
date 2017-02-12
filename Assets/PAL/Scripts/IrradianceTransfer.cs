@@ -529,6 +529,7 @@ public partial class IrradianceTransfer : MonoBehaviour
 
 	void OnDrawGizmos()
 	{
+		return;
 		for( int polygonIndex=0; polygonIndex<_irradiancePolygons.Length; polygonIndex++ )
 		{
 			var irradiancePolygon = _irradiancePolygons[polygonIndex];

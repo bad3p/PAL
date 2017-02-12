@@ -42,9 +42,8 @@ public class MeshAreaLightEditor : Editor
 	public override void OnInspectorGUI()
 	{
 		EditorGUILayout.LabelField( "Batch stats:" );
-		EditorGUILayout.LabelField( "Num polygons: " + PALBatchBuilder.NumPolygons );
-		EditorGUILayout.LabelField( "Num vertices: " + PALBatchBuilder.NumVertices );
-		EditorGUILayout.LabelField( "Buffer size: " + PALBatchBuilder.BufferSize + "/" + PALBatchBuilder.ShaderConstantBufferSize );
+		EditorGUILayout.LabelField( "Num polygons: " + PALBatchBuilder.NumPolygons + "/" + PALBatchBuilder.MaxNumPolygons );
+		EditorGUILayout.LabelField( "Num vertices: " + PALBatchBuilder.NumVertices + "/" + PALBatchBuilder.MaxNumVertices );
 		EditorGUILayout.LabelField( "Specular buffer:" );
 		EditorGUILayout.ObjectField( PALBatchBuilder.SpecularBuffer, typeof(RenderTexture), true, new GUILayoutOption[0] );
 

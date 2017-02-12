@@ -21,30 +21,36 @@
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-#ifndef __PAL_CGINC_INCLUDED__
-#define __PAL_CGINC_INCLUDED__
+#ifndef __PAL_GL_CGINC_INCLUDED__
+#define __PAL_GL_CGINC_INCLUDED__
 
 #include "UnityCG.cginc"
 
 uniform int     _PALNumPolygons;
 uniform int     _PALNumVertices;
-uniform float4  _PALPolygonBuffer[1023];
-uniform float4  _PALVertexBuffer[1023];
+uniform float4  _PALPolygonDesc[66];
+uniform float4  _PALPolygonColor[66];
+uniform float4  _PALPolygonNormal[66];
+uniform float4  _PALPolygonTangent[66];
+uniform float4  _PALPolygonBitangent[66];
+uniform float4  _PALPolygonCentroid[66];
+uniform float4  _PALPolygonCircumcircle[66];
+uniform float4  _PALPolygonSpecularUV[66];
+uniform float4  _PALVertexBuffer[99];
 sampler2D_float _PALSpecularBuffer;
-
-#define PAL_POLYGON_DESC(polygonIndex) _PALPolygonBuffer[polygonIndex*8] 
-#define PAL_POLYGON_COLOR(polygonIndex) _PALPolygonBuffer[polygonIndex*8+1]
-#define PAL_POLYGON_NORMAL(polygonIndex) _PALPolygonBuffer[polygonIndex*8+2]
-#define PAL_POLYGON_TANGENT(polygonIndex) _PALPolygonBuffer[polygonIndex*8+3]
-#define PAL_POLYGON_BITANGENT(polygonIndex) _PALPolygonBuffer[polygonIndex*8+4]
-#define PAL_POLYGON_CENTROID(polygonIndex) _PALPolygonBuffer[polygonIndex*8+5]
-#define PAL_POLYGON_CIRCUMCIRCLE(polygonIndex) _PALPolygonBuffer[polygonIndex*8+6]
-#define PAL_POLYGON_SPECULAR_UVS(polygonIndex) _PALPolygonBuffer[polygonIndex*8+7]
 
 float PALLocalOcclusion(float4 polygonCircumcircle, float4 fragmentPlane)
 {
 	float distanceToFragmentPlane = dot( polygonCircumcircle.xyz, fragmentPlane.xyz ) + fragmentPlane.w;
 	return clamp( (distanceToFragmentPlane+polygonCircumcircle.w)/(2*polygonCircumcircle.w), 0, 1 );
+}
+
+float3 PALPolygonVertex(int index, float3 polygonCircumcenter, float3 polygonTangent, float3 polygonBitangent)
+{
+	float4 vertexBufferData = _PALVertexBuffer[index/2];
+	int caseIndex = index%2;
+	float2 planarVertexCoords = vertexBufferData.xy * ( 1 - caseIndex ) + vertexBufferData.zw * caseIndex;
+	return polygonCircumcenter + polygonTangent * planarVertexCoords.x + polygonBitangent * planarVertexCoords.y;
 }
 
 float4 PALDiffuseContribution(float3 worldPos, float3 worldNormal)
@@ -57,11 +63,13 @@ float4 PALDiffuseContribution(float3 worldPos, float3 worldNormal)
 
 	for( int i=0; i<numPolygons; i++ )
 	{
-		float4 polygonDesc = PAL_POLYGON_DESC(i);
-		float4 polygonColor = PAL_POLYGON_COLOR(i);
-		float4 polygonNormal = PAL_POLYGON_NORMAL(i);
-		float4 polygonCentroid = PAL_POLYGON_CENTROID(i);
-		float4 polygonCircumcircle = PAL_POLYGON_CIRCUMCIRCLE(i);
+		float4 polygonDesc = _PALPolygonDesc[i];
+		float4 polygonColor = _PALPolygonColor[i];
+		float4 polygonNormal = _PALPolygonNormal[i];
+		float4 polygonTangent = _PALPolygonTangent[i];
+		float4 polygonBitangent = _PALPolygonBitangent[i];
+		float4 polygonCentroid = _PALPolygonCentroid[i];
+		float4 polygonCircumcircle = _PALPolygonCircumcircle[i];
 		float polygonCircumradius = polygonCircumcircle.w;
 
 		int firstVertexIndex = (int)polygonDesc.x;
@@ -76,7 +84,7 @@ float4 PALDiffuseContribution(float3 worldPos, float3 worldNormal)
 			float weightSum = 0;
 			for( int j=firstVertexIndex; j<lastVertexIndex; j++ )
 			{
-				float3 polygonVertex = _PALVertexBuffer[j].xyz;
+				float3 polygonVertex = PALPolygonVertex( j, polygonCircumcircle.xyz, polygonTangent.xyz, polygonBitangent.xyz );
 				float weight = 1.0 / distance( polygonVertex, worldPos );
 				weightSum += weight;
 				weightedPointOnPolygon += polygonVertex * weight;
@@ -99,7 +107,7 @@ float4 PALDiffuseContribution(float3 worldPos, float3 worldNormal)
 
 			float polygonArea = 0;
 
-			float3 v0 = _PALVertexBuffer[firstVertexIndex].xyz - biasedWorldPos;
+			float3 v0 = PALPolygonVertex( firstVertexIndex, polygonCircumcircle.xyz, polygonTangent.xyz, polygonBitangent.xyz ) - biasedWorldPos;
 			v0 = float3( dot( v0, projectionBasisX ), dot( v0, projectionBasisY ), dot( v0, projectionBasisZ ) );
 			v0.xy /= v0.z;
 
@@ -107,7 +115,7 @@ float4 PALDiffuseContribution(float3 worldPos, float3 worldNormal)
 
 			for( int j=firstVertexIndex+1; j<lastVertexIndex; j++ )
 			{
-				float3 v1 = _PALVertexBuffer[j].xyz - biasedWorldPos; 
+				float3 v1 = PALPolygonVertex( j, polygonCircumcircle.xyz, polygonTangent.xyz, polygonBitangent.xyz ) - biasedWorldPos; 
 				v1 = float3( dot( v1, projectionBasisX ), dot( v1, projectionBasisY ), dot( v1, projectionBasisZ ) );
 				v1.xy /= v1.z;
 
@@ -136,11 +144,13 @@ float PALDiffuseIntensity(float3 worldPos, float3 worldNormal)
 
 	for( int i=0; i<numPolygons; i++ )
 	{
-		float4 polygonDesc = PAL_POLYGON_DESC(i);
-		float4 polygonColor = PAL_POLYGON_COLOR(i);
-		float4 polygonNormal = PAL_POLYGON_NORMAL(i);
-		float4 polygonCentroid = PAL_POLYGON_CENTROID(i);
-		float4 polygonCircumcircle = PAL_POLYGON_CIRCUMCIRCLE(i);
+		float4 polygonDesc = _PALPolygonDesc[i];
+		float4 polygonColor = _PALPolygonColor[i];
+		float4 polygonNormal = _PALPolygonNormal[i];
+		float4 polygonTangent = _PALPolygonTangent[i];
+		float4 polygonBitangent = _PALPolygonBitangent[i];
+		float4 polygonCentroid = _PALPolygonCentroid[i];
+		float4 polygonCircumcircle = _PALPolygonCircumcircle[i];
 		float polygonCircumradius = polygonCircumcircle.w;
 
 		int firstVertexIndex = (int)polygonDesc.x;
@@ -155,7 +165,7 @@ float PALDiffuseIntensity(float3 worldPos, float3 worldNormal)
 			float weightSum = 0;
 			for( int j=firstVertexIndex; j<lastVertexIndex; j++ )
 			{
-				float3 polygonVertex = _PALVertexBuffer[j].xyz;
+				float3 polygonVertex = PALPolygonVertex( j, polygonCircumcircle.xyz, polygonTangent.xyz, polygonBitangent.xyz );
 				float weight = 1.0 / distance( polygonVertex, worldPos );
 				weightSum += weight;
 				weightedPointOnPolygon += polygonVertex * weight;
@@ -178,13 +188,13 @@ float PALDiffuseIntensity(float3 worldPos, float3 worldNormal)
 
 			float polygonArea = 0;
 
-			float3 v0 = _PALVertexBuffer[firstVertexIndex].xyz - biasedWorldPos;
+			float3 v0 = PALPolygonVertex( firstVertexIndex, polygonCircumcircle.xyz, polygonTangent.xyz, polygonBitangent.xyz ) - biasedWorldPos;
 			v0 = float3( dot( v0, projectionBasisX ), dot( v0, projectionBasisY ), dot( v0, projectionBasisZ ) );
 			v0.xy /= v0.z;
 
 			for( int j=firstVertexIndex+1; j<lastVertexIndex; j++ )
 			{
-				float3 v1 = _PALVertexBuffer[j].xyz - biasedWorldPos; 
+				float3 v1 = PALPolygonVertex( j, polygonCircumcircle.xyz, polygonTangent.xyz, polygonBitangent.xyz ) - biasedWorldPos; 
 				v1 = float3( dot( v1, projectionBasisX ), dot( v1, projectionBasisY ), dot( v1, projectionBasisZ ) );
 				v1.xy /= v1.z;
 
@@ -215,16 +225,16 @@ float4 PALBufferedSpecularContribution(float3 worldPos, float3 worldNormal, floa
 
 	for( int i=0; i<numPolygons; i++ )
 	{
-		float4 polygonSpecularUVs = PAL_POLYGON_SPECULAR_UVS(i);
+		float4 polygonSpecularUVs = _PALPolygonSpecularUV[i];
 		if( dot( polygonSpecularUVs.zw, polygonSpecularUVs.zw ) > 0 )
 		{
-			float4 polygonDesc = PAL_POLYGON_DESC(i);
-			float4 polygonColor = PAL_POLYGON_COLOR(i);
-			float4 polygonNormal = PAL_POLYGON_NORMAL(i);
-			float4 polygonCentroid = PAL_POLYGON_CENTROID(i);
-			float4 polygonTangent = PAL_POLYGON_TANGENT(i);
-			float4 polygonBitangent = PAL_POLYGON_BITANGENT(i);
-			float4 polygonCircumcircle = PAL_POLYGON_CIRCUMCIRCLE(i);
+			float4 polygonDesc = _PALPolygonDesc[i];
+			float4 polygonColor = _PALPolygonColor[i];
+			float4 polygonNormal = _PALPolygonNormal[i];
+			float4 polygonTangent = _PALPolygonTangent[i];
+			float4 polygonBitangent = _PALPolygonBitangent[i];
+			float4 polygonCentroid = _PALPolygonCentroid[i];
+			float4 polygonCircumcircle = _PALPolygonCircumcircle[i];
 			float intensity = polygonDesc.z;
 
 			float3 worldPosToPolygonDir = polygonCentroid.xyz - worldPos;

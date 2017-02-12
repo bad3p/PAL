@@ -49,7 +49,7 @@ Shader "Hidden/PALSpecularBuffer"
 			#pragma vertex vert
 			#pragma fragment frag
 			#pragma fragmentoption ARB_precision_hint_fastest
-			#pragma exclude_renderers d3d11_9x
+			#pragma exclude_renderers d3d11_9x glcore gles gles3 
 
 			#include "UnityCG.cginc"
 			#include "PAL.cginc"
@@ -147,6 +147,141 @@ Shader "Hidden/PALSpecularBuffer"
         		}
 
         		if( crossingNumber & 1 )
+        		{
+        			return 0;
+        		}
+        		else
+        		{
+					return minDistance;
+				}
+			}
+			ENDCG
+		}
+	}
+
+	SubShader 
+	{
+		Tags { "Queue"="Geometry" "RenderType"="Opaque" }
+		LOD 100
+		ZTest Always
+		Cull Off
+		ZWrite Off
+		Fog { Mode off }
+		
+		Pass
+		{
+			Name "ForwardBase" 
+			Tags { "LightMode"="ForwardBase" }
+			Blend One One
+    		
+			CGPROGRAM
+			#pragma target 3.0
+			#pragma vertex vert
+			#pragma fragment frag
+			#pragma fragmentoption ARB_precision_hint_fastest
+			#pragma only_renderers glcore gles gles3 
+			#pragma extension GL_EXT_gpu_shader4
+
+			#include "UnityCG.cginc"
+			#include "PALGL.cginc"
+
+			int    _PolygonIndex;
+			float4 _UVOriginAndSize;
+
+			struct appdata
+			{
+				float4 vertex   : POSITION;
+				float2 texcoord : TEXCOORD0;
+			};
+
+			struct v2f 
+			{
+				float4 pos : SV_POSITION;
+				float2 uv  : TEXCOORD0;
+			};
+
+			v2f vert (appdata v) 
+			{
+				v2f o;
+				o.pos = mul( UNITY_MATRIX_MVP, v.vertex );
+				o.uv = v.texcoord;
+				return o;
+			}
+
+			float2 PALPlanarPolygonVertex(int index)
+			{
+				float4 vertexBufferData = _PALVertexBuffer[index/2];
+				int caseIndex = index%2;
+				return vertexBufferData.xy * ( 1 - caseIndex ) + vertexBufferData.zw * caseIndex;
+			}
+
+			// http://www.iquilezles.org/www/articles/distfunctions/distfunctions.htm
+			float DistanceToLine(float2 p, float2 a, float2 b)
+			{
+    			float2 pa = p - a;
+    			float2 ba = b - a;
+    			float h = clamp( dot( pa, ba ) / dot( ba, ba ), 0.0, 1.0 );
+    			return length( pa - ba * h );
+			}
+
+			float4 frag (v2f i) : SV_Target  
+			{
+				float2 aabbInf = _UVOriginAndSize.xy;
+				float2 aabbSup = _UVOriginAndSize.xy + _UVOriginAndSize.zw;
+
+				bool2 isGreaterOrEqualThanInf = ( i.uv >= aabbInf );
+				bool2 isLesserThanSup = ( i.uv < aabbSup );
+				bool2 isInAABB = ( isGreaterOrEqualThanInf * isLesserThanSup );
+
+				if( !isInAABB.x || !isInAABB.y ) return 0;
+
+				float2 localNormalizedCoords = ( _UVOriginAndSize.xy + 0.5 * _UVOriginAndSize.zw - i.uv ) / ( 0.5 * _UVOriginAndSize.zw );
+				localNormalizedCoords = -localNormalizedCoords;
+
+				float4 polygonDesc = _PALPolygonDesc[_PolygonIndex];
+				float4 polygonNormal = _PALPolygonNormal[_PolygonIndex];
+				float4 polygonTangent = _PALPolygonTangent[_PolygonIndex];
+				float4 polygonBitangent = _PALPolygonBitangent[_PolygonIndex];
+				float4 polygonCircumcircle = _PALPolygonCircumcircle[_PolygonIndex];
+
+				int firstVertexIndex = (int)polygonDesc.x;
+				int lastVertexIndex = (int)polygonDesc.y;
+
+				float2 localPoint = localNormalizedCoords * polygonCircumcircle.w * 3; // TODO: configure
+
+				// http://geomalgorithms.com/a03-_inclusion.html
+				uint crossingNumber = 0;
+				float minDistance = 3.4e38;
+				for( int j=firstVertexIndex; j<lastVertexIndex; j++ )
+				{
+					int jPlusOne = j+1;
+					if( j == lastVertexIndex-1 ) jPlusOne = firstVertexIndex;
+
+					float2 pj = PALPlanarPolygonVertex( j );
+					float2 pjPlusOne = PALPlanarPolygonVertex( jPlusOne );
+
+					float edgeDistanceY = ( pjPlusOne.y - pj.y );
+					float edgeDistanceX = ( pjPlusOne.x - pj.x );
+
+					if( ( ( pj.y <= localPoint.y ) && ( pjPlusOne.y > localPoint.y) ) || 
+       		    		( ( pj.y > localPoint.y ) && ( pjPlusOne.y <= localPoint.y) ) ) 
+       				{
+            			float vt = ( localPoint.y - pj.y ) / edgeDistanceY;
+
+            			if( localPoint.x < pj.x + vt * edgeDistanceX )
+            			{
+            				crossingNumber++;
+            			}
+					}
+
+					float dist = DistanceToLine( localPoint, pj, pjPlusOne );
+					if( dist > 0 )
+					{
+						minDistance = min( minDistance, dist );
+					}
+        		}
+
+        		if( crossingNumber % 2 == 1 ) 
         		{
         			return 0;
         		}
