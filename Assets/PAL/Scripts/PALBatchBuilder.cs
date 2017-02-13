@@ -53,7 +53,7 @@ static public class PALBatchBuilder
 		{
 			_polygonalAreaLights = new List<PolygonalAreaLight>();
 			_specularBufferMaterial = new Material( Shader.Find( "Hidden/PALSpecularBuffer" ) );
-			_specularBuffer = new RenderTexture( 2048, 2048, 0, RenderTextureFormat.RFloat, RenderTextureReadWrite.Linear );
+			_specularBuffer = new RenderTexture( 512, 512, 0, RenderTextureFormat.RFloat, RenderTextureReadWrite.Linear );
 			_specularBuffer.generateMips = false;
 		}
 
@@ -302,14 +302,17 @@ static public class PALBatchBuilder
 			}
 
 			// gl-specific data
-			_glPolygonDesc[batchIndex] = _dxPolygonBuffer[batchIndex*8];
-			_glPolygonColor[batchIndex] = _dxPolygonBuffer[batchIndex*8+1];
-			_glPolygonNormal[batchIndex] = _dxPolygonBuffer[batchIndex*8+2];
-			_glPolygonTangent[batchIndex] = _dxPolygonBuffer[batchIndex*8+3];
-			_glPolygonBitangent[batchIndex] = _dxPolygonBuffer[batchIndex*8+4];
-			_glPolygonCentroid[batchIndex] = _dxPolygonBuffer[batchIndex*8+5];
-			_glPolygonCircumcircle[batchIndex] = _dxPolygonBuffer[batchIndex*8+6];
-			_glPolygonSpecularUV[batchIndex] = _dxPolygonBuffer[batchIndex*8+7];
+			if( batchIndex < _glPolygonDesc.Length )
+			{
+				_glPolygonDesc[batchIndex] = _dxPolygonBuffer[batchIndex*8];
+				_glPolygonColor[batchIndex] = _dxPolygonBuffer[batchIndex*8+1];
+				_glPolygonNormal[batchIndex] = _dxPolygonBuffer[batchIndex*8+2];
+				_glPolygonTangent[batchIndex] = _dxPolygonBuffer[batchIndex*8+3];
+				_glPolygonBitangent[batchIndex] = _dxPolygonBuffer[batchIndex*8+4];
+				_glPolygonCentroid[batchIndex] = _dxPolygonBuffer[batchIndex*8+5];
+				_glPolygonCircumcircle[batchIndex] = _dxPolygonBuffer[batchIndex*8+6];
+				_glPolygonSpecularUV[batchIndex] = _dxPolygonBuffer[batchIndex*8+7];
+			}
 
 			vertexBufferOffset += polygonalAreaLight.Vertices.Length;
 			batchIndex++;
