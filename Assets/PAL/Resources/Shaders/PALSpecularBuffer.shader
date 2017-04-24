@@ -40,7 +40,7 @@ Shader "Hidden/PALSpecularBuffer"
 		
 		Pass
 		{
-			Name "ForwardBase" 
+			Name "DX"
 			Tags { "LightMode"="ForwardBase" }
 			Blend One One
     		
@@ -140,10 +140,7 @@ Shader "Hidden/PALSpecularBuffer"
 					}
 
 					float dist = DistanceToLine( localPoint, pj, pjPlusOne );
-					if( dist > 0 )
-					{
-						minDistance = min( minDistance, dist );
-					}
+					minDistance = min( minDistance, dist );
         		}
 
         		if( crossingNumber & 1 )
@@ -170,7 +167,7 @@ Shader "Hidden/PALSpecularBuffer"
 		
 		Pass
 		{
-			Name "ForwardBase" 
+			Name "GL"
 			Tags { "LightMode"="ForwardBase" }
 			Blend One One
     		
@@ -275,13 +272,10 @@ Shader "Hidden/PALSpecularBuffer"
 					}
 
 					float dist = DistanceToLine( localPoint, pj, pjPlusOne );
-					if( dist > 0 )
-					{
-						minDistance = min( minDistance, dist );
-					}
+					minDistance = min( minDistance, dist );
         		}
 
-        		if( crossingNumber % 2 == 1 ) 
+        		if( crossingNumber % 2 == 1 )
         		{
         			return 0;
         		}

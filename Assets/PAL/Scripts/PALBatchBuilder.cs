@@ -54,7 +54,7 @@ static public class PALBatchBuilder
 			_polygonalAreaLights = new List<PolygonalAreaLight>();
 			_specularBufferMaterial = new Material( Shader.Find( "Hidden/PALSpecularBuffer" ) );
 			_specularBuffer = new RenderTexture( 512, 512, 0, RenderTextureFormat.RFloat, RenderTextureReadWrite.Linear );
-			_specularBuffer.generateMips = false;
+			_specularBuffer.autoGenerateMips = false;
 		}
 
 		if( _polygonalAreaLights.Contains( polygonalAreaLight ) )
@@ -107,6 +107,7 @@ static public class PALBatchBuilder
 			}
 		} 
 	}
+
 	static public int MaxNumVertices
 	{
 		get 
