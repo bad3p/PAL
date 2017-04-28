@@ -208,9 +208,15 @@ float3 RayPlaneIntersection(float4 plane, float3 pointOnPlane, float3 rayOrigin,
 	return rayOrigin + rayDirection * s;
 }
 
-float4 PALBufferedSpecularContribution(float3 worldPos, float3 worldNormal, float3 worldRefl, float phongExponent)
+float4 PALBufferedSpecularContribution(float3 worldPos, float3 worldNormal, float3 worldView, float3 worldRefl, float phongExponent)
 {
 	int numPolygons = _PALNumPolygons;
+
+	// make it to appear more like PBR
+    float3 eyeToFragmentDir = mul( UNITY_MATRIX_MV, float4( worldPos - _WorldSpaceCameraPos, 1 ) ).xyz;
+    eyeToFragmentDir = normalize( eyeToFragmentDir );
+    float fragmentOffset = abs(eyeToFragmentDir.x);
+    float specularIntensity = 1 - fragmentOffset;
 
 	float4 specularColor = 0; 
 
@@ -248,7 +254,7 @@ float4 PALBufferedSpecularContribution(float3 worldPos, float3 worldNormal, floa
 
 					float fadeFactor0 = saturate( polygonCircumcircle.w / distance( intersectionPoint, worldPos ) );
 					float fadeFactor1 = 1 - intersectionDist / ( _PALPhi * polygonCircumcircle.w );
-					float fadeFactor = fadeFactor0 * fadeFactor1;
+					float fadeFactor = fadeFactor0 * fadeFactor1 * specularIntensity;
 
 					specularColor += polygonColor * intensity * fadeFactor * 1.0 / pow( ( normalizedDist + 1 ), phongExponent );
 				}

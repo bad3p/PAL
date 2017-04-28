@@ -150,7 +150,7 @@ Shader "PAL/Opaque"
 
 					#if defined(_PAL_SPECULAR)
 						float3 worldRefl = reflect( i.worldViewDir, worldNormal );
-						result.xyz += PALBufferedSpecularContribution( i.worldPos, worldNormal, worldRefl, _PhongExponent );
+						result.xyz += PALBufferedSpecularContribution( i.worldPos, worldNormal, i.worldViewDir, worldRefl, _PhongExponent );
 					#endif
 
 					#if defined(FOG_LINEAR) || defined(FOG_EXP) || defined(FOG_EXP2)
@@ -282,7 +282,7 @@ Shader "PAL/Opaque"
 
 					#if defined(_PAL_SPECULAR)
 						float3 worldRefl = reflect( i.worldViewDir, worldNormal );
-						result.xyz += PALBufferedSpecularContribution( i.worldPos,worldNormal,  worldRefl, _PhongExponent );
+						result.xyz += PALBufferedSpecularContribution( i.worldPos, worldNormal, i.worldViewDir, worldRefl, _PhongExponent );
 					#endif
 
 					#if defined(FOG_LINEAR) || defined(FOG_EXP) || defined(FOG_EXP2)
