@@ -116,3 +116,4 @@ The method presented in this work allows us to easily introduce illumination fro
 ![Example](https://media.licdn.com/mpr/mpr/AAEAAQAAAAAAAAlxAAAAJDkzNDJiODY4LTkzYTQtNDNhNC04NTQyLWJkNjcwNTE4MzM5Ng.png)
 ![Example](https://media.licdn.com/mpr/mpr/AAEAAQAAAAAAAAlOAAAAJGZlN2NhMTRhLWQwZTUtNGIzZC1iMmU2LTY0ODNlNDFkYTBiOQ.png)
 ![Example](https://media.licdn.com/mpr/mpr/AAEAAQAAAAAAAAiqAAAAJDM5ZTQyMjVkLWM5MTEtNDI3Mi05MjcxLWIyYjQ4MzM4Mzc4OQ.png)
+![Example](https://github.com/bad3p/PAL/blob/master/Docs/Images/Specular.png)
