@@ -1,5 +1,5 @@
 
-# PAL PROJECT
+# POLYGONAL AREA LIGHTS
 
 Supported APIs:
 
